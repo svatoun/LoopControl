@@ -10,6 +10,8 @@
 #include "Loops.h"
 #include "S88.h"
 
+long outageTimeout = 5 * 60 * 1000; // 5 minutes
+
 /**
  * This is a state automaton for the loop. It works with the following conditions
  *
@@ -339,13 +341,29 @@ void LoopState::processChange(int sensor, boolean s) {
 	if (!d.active) {
 		return;
 	}
-	if (d.occupiedTrackSensors() == 0) {
+	boolean active = d.occupiedTrackSensors();
+	if (active) {
+		if (outage() && !d.core.occupied()) {
+			Serial.println(F("Outage recovery => idle"));
+			switchStatus(idle, d.left);
+		}
+	} else {
 		// remain silent, maybe track power outage...
 		switch (status) {
 		case approach:
 		case exited:
+		case idle:
 			break;
 		default:
+			if (outageStart == 0) {
+				outageStart = millis();
+				break;
+			}
+			long delta = millis() - outageStart;
+			if (delta > outageTimeout) {
+				Serial.println(F("Outage timeout => idle"));
+				switchStatus(idle, d.left);
+			}
 			return;
 		}
 	}
@@ -380,5 +398,9 @@ void LoopState::processChange(int sensor, boolean s) {
 		case exited:
 			processExited(sensor, toEdge());
 			break;
+
+	}
+	if (active) {
+		outageStart = 0;
 	}
 }

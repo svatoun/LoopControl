@@ -158,6 +158,13 @@ boolean LoopCore::hasChanged() const {
 	return false;
 }
 
+boolean LoopCore::occupied() const {
+	if (track > 0) {
+		return readS88(track) != invertTrack;
+	}
+	return false;
+}
+
 boolean LoopCore::isPrimed() const {
 	if (track > 0) {
 		boolean st = readS88(track) != invertTrack;

@@ -95,6 +95,7 @@ struct LoopCore {
 	boolean hasSensor(int id) const {
 		return (track == id) || (sensorA == id) || (sensorB == id);
 	}
+	boolean occupied() const;
 	void printState() const;
 	int forSensors(sensorIteratorFunc fn) const;
 	LoopCore() : track(0), sensorA(0), sensorB(0), invertA(false), invertB(false), invertTrack(false) {}
@@ -230,8 +231,11 @@ struct LoopState {
 	Status status : 4;
 	Direction direction : 1;
 	long timeout;
+	long outageStart;
 
-	LoopState() : status(Status::idle), direction(left), timeout(0) {}
+	LoopState() : status(Status::idle), direction(left), timeout(0), outageStart(0) {}
+
+	boolean outage() const { return outageStart > 0; };
 
 	void switchStatus(Status s, const Endpoint& e);
 	void processChange(int sensor, boolean state);
