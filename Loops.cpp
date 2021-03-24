@@ -114,11 +114,15 @@ boolean Endpoint::stateB() const {
 void Endpoint::printState() const {
 	printSensorAndState(F("trackA"), sensorA, invertA);
 	Serial.print('\t'); printSensorAndState(F("trackB"), sensorB, invertB);
+	if (turnout > 0) {
+		Serial.print('\t'); printSensorAndState(F("turnout"), turnout, invertTurnout);
+	}
 	if (useSwitch) {
 		Serial.print('\t'); printSensorAndState(F("switch"), switchOrSensor, invertSensor);
 	} else {
 		Serial.print('\t'); printSensorAndState(F("sensor"), switchOrSensor, invertSensor);
 	}
+	Serial.print(F("\tRelay=")); Serial.print(triggerState);
 	Serial.print(F("\tPrimed: ")); Serial.print(isPrimedEnter());
 	Serial.println();
 }
@@ -210,6 +214,10 @@ int Endpoint::forSensors(sensorIteratorFunc fn) const {
 	int cnt = 0;
 	callSensorFunc(sensorA, cnt, fn);
 	callSensorFunc(sensorB, cnt, fn);
+	callSensorFunc(sensorIn, cnt, fn);
+	callSensorFunc(sensorOut, cnt, fn);
+	callSensorFunc(shortTrack, cnt, fn);
+	callSensorFunc(turnout, cnt, fn);
 	callSensorFunc(switchOrSensor, cnt, fn);
 	return cnt;
 }
@@ -234,6 +242,10 @@ boolean Endpoint::isPrimedEnter() const{
 	if (!isValidEnter()) {
 		return false;
 	}
+	if (sensorIn > 0) {
+		boolean ss = readS88(switchOrSensor) != invertInSensor;
+		return ss;
+	}
 	if (switchOrSensor > 0 && !useSwitch) {
 		// for "primed", the sensor must be active.
 		boolean ss = readS88(switchOrSensor) != invertSensor;
@@ -247,6 +259,17 @@ boolean Endpoint::isValidEnter() const {
 		boolean stateA = readS88(sensorA);
 		boolean stateB = readS88(sensorB);
 
+		if (shortTrack > 0) {
+			boolean state = readS88(shortTrack) != invertShortTrack;
+			if (debugLoops) {
+				Serial.print(F("Two enter tracks + short track: "));
+				Serial.print(shortTrack); Serial.print(F("=")); Serial.println(state);
+			}
+			if (state) {
+				// short track does not depend on divergent enters
+				return true;
+			}
+		}
 		if (debugLoops) {
 			Serial.print(F("Two enter tracks: "));
 			Serial.print(sensorA); Serial.print(F("=")); Serial.print(stateA);
@@ -275,8 +298,25 @@ boolean Endpoint::isValidEnter() const {
 	if (debugLoops) {
 		Serial.print(F("Single track: ")); Serial.print(sensorA); Serial.print(F("=")); Serial.println(stateA);
 	}
+	if (shortTrack > 0) {
+		boolean state = readS88(shortTrack) != invertShortTrack;
+		if (debugLoops) {
+			Serial.print(F("Short track: "));
+			Serial.print(shortTrack); Serial.print(F("=")); Serial.println(state);
+		}
+		stateA |= state;
+	}
 	if (!stateA) {
 		return false;
+	}
+	if (turnout > 0) {
+		boolean ss = readS88(turnout) != invertTurnout;
+		if (debugLoops) {
+			Serial.print(F("Switched: ")); Serial.println(ss);
+		}
+		if (!ss) {
+			return false;
+		}
 	}
 	if (!useSwitch) {
 		return true;
@@ -294,9 +334,19 @@ boolean Endpoint::isValidEnter() const {
 
 int Endpoint::selectedExitTrack() const {
 	int exitTrack = sensorA;
-	if ((sensorA > 0) && (sensorB > 0) && useSwitch && (switchOrSensor > 0)) {
-		boolean switchState = readS88(switchOrSensor);
-		if (switchState != invertSensor) {
+	int tnt = 0;
+	boolean inv = false;
+	if (turnout > 0) {
+		tnt = turnout;
+		inv = invertTurnout;
+	}
+	if (useSwitch && (switchOrSensor > 0)) {
+		tnt = switchOrSensor;
+		inv = invertSensor;
+	}
+	if ((sensorA > 0) && (sensorB > 0) && (tnt > 0)) {
+		boolean switchState = readS88(tnt);
+		if (switchState != inv) {
 			exitTrack = sensorB;
 		} else {
 			exitTrack = sensorA;
@@ -309,9 +359,9 @@ int Endpoint::selectedExitTrack() const {
 	if (debugLoops) {
 		Serial.print(F("Checking track: ")); Serial.println(exitTrack);
 	}
-	if (sensorB == 0 && useSwitch && (switchOrSensor > 0)) {
-		boolean switchState = readS88(switchOrSensor);
-		if (!(switchState != invertSensor)) {
+	if (sensorB == 0 && (tnt > 0)) {
+		boolean switchState = readS88(tnt);
+		if (!(switchState != inv)) {
 			// turnout in wrong direction
 			if (debugLoops) {
 				Serial.println(F("Cannot exit: turnout"));
@@ -327,26 +377,46 @@ boolean Endpoint::occupied() const {
 	if (trackSensor < 1) {
 		return false;
 	}
-	return readS88(trackSensor);
+	if (readS88(trackSensor)) {
+		return true;
+	}
+	return shortTrack > 0 && readS88(shortTrack);
 }
 
 boolean Endpoint::changedOccupied(int sensor, boolean occupied) const {
 	int trackSensor = selectedExitTrack();
+	if (turnout > 0 && (sensor == turnout)) {
+		if ((trackSensor < 1) && !occupied) {
+			return true;
+		}
+	}
 	if (useSwitch && (sensor == switchOrSensor)) {
 		if ((trackSensor < 1) && !occupied) {
 			return true;
 		}
 	}
-	if (trackSensor != sensor) {
+	if ((trackSensor != sensor) && (shortTrack != sensor)) {
 		return false;
 	}
-	return readS88(trackSensor) == occupied;
+	boolean s = readS88(trackSensor);
+	if (shortTrack > 0) {
+		s |= readS88(shortTrack);
+	}
+	return s == occupied;
 }
 
 boolean Endpoint::isValidExit() const {
 	int exitTrack = selectedExitTrack();
+	if (exitTrack < 0) {
+		// defined, but switched to other direction
+		return false;
+	}
 	if (exitTrack > 0) {
-		if (readS88(exitTrack)) {
+		boolean s = readS88(exitTrack);
+		if (shortTrack > 0) {
+			s = readS88(shortTrack);
+		}
+		if (s) {
 			if (debugLoops) {
 				Serial.println(F("Cannot exit: occupied"));
 			}
@@ -364,6 +434,13 @@ boolean Endpoint::isValidExit() const {
 boolean Endpoint::isPrimedExit() const {
 	if (!isValidExit()) {
 		return false;
+	}
+	if (sensorOut > 0) {
+		boolean v = readS88(sensorOut) != invertOutSensor;
+		if (debugLoops) {
+			Serial.print(F("Exit sensor: ")); Serial.println(v);
+		}
+		return v;
 	}
 	if (!useSwitch && (switchOrSensor > 0)) {
 		boolean v = readS88(switchOrSensor) != invertSensor;
@@ -387,6 +464,9 @@ int Endpoint::occupiedTrackSensors() const {
 	if (sensorB > 0 && readS88(sensorB)) {
 		cnt++;
 	}
+	if (shortTrack > 0 && readS88(shortTrack)) {
+		cnt++;
+	}
 	return cnt;
 }
 
@@ -394,7 +474,8 @@ int LoopDef::forSensors(sensorIteratorFunc fn) const {
 	if (!active) {
 		return 0;
 	}
-	return left.forSensors(fn) + right.forSensors(fn) + core.forSensors(fn);
+	return
+			left.forSensors(fn) + right.forSensors(fn) + core.forSensors(fn);
 }
 
 int defineLoopSensor(int id) {
@@ -442,8 +523,10 @@ int LoopDef::occupiedTrackSensors() const {
 
 void LoopDef::printAllStates() {
 	for (int i = 0; i < maxLoopCount; i++) {
-		Serial.print(F("Loop def #")); Serial.print(i + 1); Serial.print(F(" - "));
-		loopStates[i].printState();
+		if (loopDefinitions[i].active) {
+			Serial.print(F("Loop def #")); Serial.print(i + 1); Serial.print(F(" - "));
+			loopStates[i].printState();
+		}
 	}
 }
 
@@ -451,11 +534,12 @@ void LoopState::printState() const {
 	if (!def().active) {
 		return;
 	}
+	const LoopDef& d = def();
 	Serial.print(F("Status: ")); Serial.print(statName(status));
 	Serial.print(F("\tDirection:")); Serial.println(direction == left ? F("Left") : F("Right"));
+	Serial.print(F("RelayA: ")); Serial.print(d.relayA); Serial.print(F("\tRelayB: ")); Serial.print(d.relayB);
 	def().printState();
 }
-
 
 void loopSensorCallback(int sensor, boolean state) {
 	for (int i = 0; i < maxLoopCount; i++) {
@@ -519,6 +603,13 @@ boolean eepromLoadLoops() {
 	return true;
 }
 
+void relayStatus() {
+	for (int i = 0; i < maxRelayCount; i++) {
+		Serial.print(F("Relay #")); Serial.print(i + 1); Serial.print(F(" = "));
+		Serial.println(isRelayOn(i + 1));
+	}
+}
+
 boolean loopsHandler(ModuleCmd cmd) {
 	switch (cmd) {
 	case initialize:
@@ -535,6 +626,7 @@ boolean loopsHandler(ModuleCmd cmd) {
 		break;
 	case status:
 		LoopDef::printAllStates();
+		relayStatus();
 		break;
 	}
 	return true;

@@ -105,6 +105,7 @@ void LoopState::maybeApproach(Status prevStatus, const Endpoint& from) {
 
 void LoopState::switchStatus(Status s, const Endpoint& ep) {
 	Status oldStatus = status;
+	Direction oldDirection = direction;
 
 	status = s;
 	if (debugTransitions) {
@@ -119,6 +120,7 @@ void LoopState::switchStatus(Status s, const Endpoint& ep) {
 			break;
 
 		case armed:
+			direction = directionTo(ep);
 			switchRelay(d.relayA, toEdge().triggerState);
 			switchRelay(d.relayB, toEdge().triggerState);
 			break;
@@ -132,7 +134,15 @@ void LoopState::switchStatus(Status s, const Endpoint& ep) {
 			break;
 
 		case moving:
-			maybeArm(d.opposite(ep));
+			direction = directionFrom(ep);
+			const Endpoint& opp = d.opposite(ep);
+			maybeArm(opp);
+			/*
+			if (oldStatus == armed && opp.triggerState) {
+				switchRelay(d.relayA, false);
+				switchRelay(d.relayB, false);
+			}
+			*/
 			break;
 	}
 }
@@ -243,7 +253,7 @@ void LoopState::processEntering(int sensor, const Endpoint& from) {
 			Serial.println(F("Reversed"));
 		}
 		direction = reversed;
-		switchStatus(exited, from);
+		switchStatus(exited, d.opposite(from));
 	}
 }
 
@@ -300,11 +310,17 @@ void LoopState::processArmed(int sensor, const Endpoint& to) {
 	}
 	if (to.changedOccupied(sensor, true)) {
 		switchStatus(exiting, to);
-	} else if (to.changedOccupied(sensor, false)) {
+	} else if (!to.isValidExit()) {
 		if (debugTransitions) {
 			Serial.println(F("Exit became invalid"));
 		}
-		switchStatus(moving, to);
+		// still moving in the _SAME_ direction; exit became invalid for
+		// some reason. Heading to the exit, but just in case turn off the relay.
+		if (to.triggerState) {
+			switchRelay(d.relayA, false);
+			switchRelay(d.relayB, false);
+		}
+		switchStatus(moving, d.opposite(to));
 		return;
 	}
 }
@@ -316,7 +332,7 @@ void LoopState::processExiting(int sensor, const Endpoint& via) {
 		return;
 	}
 	if (via.hasSensor(sensor) && via.changedOccupied(sensor, false)) {
-		direction = reversed();
+		// XXX
 		switchStatus(moving, via);
 		return;
 	}

@@ -283,6 +283,7 @@ void resetAllSensors() {
 	for (int i = 0; i < maxSensorCount; i++) {
 		sensors[i] = Sensor();
 	}
+	sensorCount = 0;
 }
 
 

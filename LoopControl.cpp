@@ -15,11 +15,10 @@ void setup() {
 #endif
 
 	ModuleChain::invokeAll(initialize);
-	ModuleChain::invokeAll(eepromLoad);
-
 	setupTerminal();
-
 	ModuleChain::invokeAll(test);
+
+	ModuleChain::invokeAll(eepromLoad);
 }
 
 void loop() {

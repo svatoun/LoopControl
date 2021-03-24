@@ -29,13 +29,47 @@ extern LoopState loopStates[];
  * - a track segment (or two) and a sensor that is triggered just before the loop's entry
  */
 struct Endpoint {
-	int	sensorA: 8;
-	int sensorB: 8;
+	/**
+	 * The approaching track, or one section of two possible
+	 * approaching tracks, joined (and selected) by 'turnout'.
+	 */
+	byte sensorA: 8;
+
+	/**
+	 * If != 0, the other alternative approaching track, selected by 'turnout'.
+	 */
+	byte sensorB: 8;
+
+	/**
+	 * Turnout feedback "sensor"; if nont 0, selects 'sensorA' or 'sensorB' to be read as
+	 * the approaching track section.
+	 */
+	byte turnout : 8;
+
+	/**
+	 * Sensor that triggers on inbound move. 9 = not defined.
+	 */
+	byte sensorIn : 8;
+
+	/**
+	 * Sensor that triggers on outbound move. 9 = not defined.
+	 */
+	byte sensorOut : 8;
+
+	/**
+	 * Additional joined track.
+	 */
+	byte shortTrack : 8;
+
 	int switchOrSensor : 8;
 	boolean useSwitch : 1;
 	boolean invertSensor : 1;
 	boolean invertA : 1;
 	boolean invertB : 1;
+	boolean invertShortTrack: 1;
+	boolean invertInSensor : 1;
+	boolean invertOutSensor : 1;
+	boolean invertTurnout : 1;
 	boolean triggerState : 1;
 
 	/**
@@ -68,7 +102,8 @@ struct Endpoint {
 	boolean stateB() const;
 
 	boolean hasSensor(int id) const {
-		return (sensorA == id) || (sensorB == id) || (switchOrSensor == id);
+		return (sensorA == id) || (sensorB == id) || (switchOrSensor == id) ||
+			   (turnout == id) || (sensorIn == id) || (sensorOut == id) || (shortTrack == id);
 	}
 
 	void printState() const;
@@ -77,8 +112,15 @@ struct Endpoint {
 
 	int occupiedTrackSensors() const;
 
-	Endpoint() : sensorA(0), sensorB(0), switchOrSensor(0), useSwitch(false), invertA(false), invertB(false),
-			invertSensor(false), triggerState(false) {}
+	Endpoint() :sensorA(0), invertA(false),
+				sensorB(0), invertB(false),
+				switchOrSensor(0), invertSensor(false), useSwitch(false),
+				turnout(0), invertTurnout(false),
+				sensorIn(0), invertInSensor(false),
+				sensorOut(0), invertOutSensor(false),
+				shortTrack(0), invertShortTrack(false),
+
+				triggerState(false) {}
 };
 
 struct LoopCore {
@@ -198,6 +240,10 @@ struct LoopState {
 
 	Direction reversed() const {
 		return direction == left ? right : left;
+	}
+
+	Direction directionTo(const Endpoint& ep) {
+		return &(def().left) == &ep ? left : right;
 	}
 
 	Direction directionFrom(const Endpoint& ep) {

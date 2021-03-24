@@ -23,7 +23,7 @@ void assert(const char* msg, boolean cond) {
 	Serial.print(F("*** ERROR: "));
 	Serial.println(msg);
 	debugPrintSeparator();
-	delay(5000);
+	delay(2000);
 }
 
 void assert(const String& msg, boolean cond) {

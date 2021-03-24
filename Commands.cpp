@@ -90,13 +90,16 @@ void commandEndpoint() {
 	do {
 		char c = *inputPos;
 		switch (c) {
-		case 'a': case 'A':
-		case 'b': case 'B':
-		case 's': case 'S':
-		case 't': case 'T':
+		case 'a': case 'A':	// sensor 'A'
+		case 'b': case 'B': // sensor 'B'
+		case 'i': case 'I': // IN sensor
+		case 'o': case 'O': // OUT sensor
+		case 's': case 'S': // IN+OUT sensor
+		case 'h': case 'H': // sHort track, but 's' is already taken
+		case 't': case 'T': // track
 			break;
 		default:
-			Serial.println(F("Invalid sensor (a-b-s-t)"));
+			Serial.println(F("Sensor not in [abhiost]"));
 			return;
 		}
 		inputPos++;
@@ -126,15 +129,27 @@ void commandEndpoint() {
 			ptr->sensorB = sno;
 			ptr->invertB = invert;
 			break;
+		case 'h': case 'H':
+			ptr->shortTrack = sno;
+			ptr->invertShortTrack = invert;
+			break;
+		case 'i':
+			ptr->sensorIn = sno;
+			ptr->invertInSensor = invert;
+			break;
+		case 'o':
+			ptr->sensorIn = sno;
+			ptr->invertOutSensor = invert;
+			break;
 		case 's': case 'S':
-			ptr->switchOrSensor = sno;
-			ptr->invertSensor = invert;
-			ptr->useSwitch = false;
+			ptr->sensorIn = sno;
+			ptr->invertInSensor = invert;
+			ptr->sensorIn = sno;
+			ptr->invertOutSensor = invert;
 			break;
 		case 't': case 'T':
-			ptr->switchOrSensor = sno;
-			ptr->invertSensor = invert;
-			ptr->useSwitch = true;
+			ptr->turnout = sno;
+			ptr->invertTurnout = invert;
 			break;
 		default:
 			Serial.println(F("Error."));
@@ -198,6 +213,43 @@ void commandCore() {
 	ptr->printState();
 }
 
+void commandRelay() {
+	do {
+		char c = *inputPos;
+		switch (c) {
+		case 'a': case 'A':
+		case 'b': case 'B':
+			break;
+		default:
+			Serial.println(F("Relay not in [ab]"));
+			return;
+		}
+		inputPos++;
+		if (*inputPos != '=') {
+			Serial.println(F("Syntax error"));
+			return;
+		}
+		inputPos++;
+		int sno = nextNumber();
+		if (sno < 1 || sno > maxRelayCount) {
+			Serial.println("Invalid relay");
+			return;
+		}
+		switch (c) {
+		case 'a': case 'A':
+			editedLoop.relayA = sno;
+			break;
+		case 'b': case 'B':
+			editedLoop.relayB = sno;
+			break;
+		default:
+			Serial.println(F("Error."));
+			return;
+		}
+	} while (*inputPos);
+	Serial.println(F("Relay defined"));
+}
+
 void commandCancel() {
 	if (editedLoopId == -1) {
 		Serial.print(F("No edit to cancel."));
@@ -232,7 +284,7 @@ void commandFinish() {
 		commandCancel();
 		return;
 	}
-	if (editedLoop.relayA > 0 || editedLoop.relayB > 0) {
+	if (editedLoop.relayA == 0 && editedLoop.relayB == 0) {
 		Serial.print(F("Invalid, no relays"));
 		commandCancel();
 		return;
@@ -249,6 +301,7 @@ void initCommands() {
   registerLineCommand("DEF", &commandLoop);
   registerLineCommand("EPT", &commandEndpoint);
   registerLineCommand("COR", &commandCore);
+  registerLineCommand("REL", &commandRelay);
   registerLineCommand("CAN", &commandCancel);
   registerLineCommand("FIN", &commandFinish);
 }
