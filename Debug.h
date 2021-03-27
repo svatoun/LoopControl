@@ -25,8 +25,9 @@ const int debugRelays = 1;
 #undef __test_s88
 #define __test_loop
 
-#define __test_baloon
-#undef __test_station
+#undef __test_baloon
+#define __test_station
+#undef __test_baloon_sensor
 
 void assert(const char* msg, boolean condition);
 void assert(const String& msg, boolean condition);

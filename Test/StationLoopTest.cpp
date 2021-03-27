@@ -89,7 +89,6 @@ boolean Station::commandTest(ModuleCmd cmd) {
 	}
 	ModuleChain::invokeAll(reset);
 
-	/*
 	Station().testGoThroughLeft();
 	Station().testGoThroughRight();
 	Station().testRetractFromEntryLeft();
@@ -98,11 +97,10 @@ boolean Station::commandTest(ModuleCmd cmd) {
 
 	Station().testReverseFromMiddleRight();
 	Station().testFromRightBackAndForth();
-	*/
 	Station().testOutageInMiddle();
 	/*
 	Station().testInterferingTrain();
-*/
+	*/
 	return true;
 }
 
@@ -462,7 +460,7 @@ void Station::testInterferingTrain() {
 
 #ifdef __test_station
 
-ModuleChain baloonTestModule("stationTest", 99, &Station::commandTest);
+ModuleChain stationTestModule("stationTest", 99, &Station::commandTest);
 
 #endif
 

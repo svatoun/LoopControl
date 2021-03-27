@@ -21,6 +21,13 @@ boolean relayStates[maxRelayCount] = {};
 
 int loopCount = 0;
 
+long timeDiff(long time) {
+	if (time == 0) {
+		return 0;
+	}
+	return millis() - time;
+}
+
 boolean defineLoop(int id, const LoopDef& edited) {
 	if (id < 0 || id >= maxLoopCount) {
 		return false;
@@ -127,10 +134,57 @@ void Endpoint::printState() const {
 	Serial.println();
 }
 
+void dumpSensor(char type, int sensor, boolean invert) {
+	if (sensor <= 0) {
+		return;
+	}
+	Serial.print(':');
+	Serial.print(type);
+	Serial.print('=');
+	if (invert) {
+		Serial.print('-');
+	}
+	Serial.print(sensor);
+}
+
+void Endpoint::dump(boolean left) const {
+	if (sensorA == 0 &&
+		sensorIn == 0 &&
+		sensorOut == 0) {
+		return;
+	}
+	Serial.print(F("EPT:"));
+	Serial.print(left ? 'L' : 'R');
+	if (triggerState) {
+		Serial.print('*');
+	}
+	dumpSensor('A', sensorA, invertA);
+	dumpSensor('B', sensorB, invertB);
+	dumpSensor('H', shortTrack, invertShortTrack);
+	dumpSensor('T', turnout, invertTurnout);
+	if ((sensorIn > 0) &&
+		(sensorIn == sensorOut)) {
+		dumpSensor('S', sensorIn, invertInSensor);
+	} else {
+		dumpSensor('I', sensorIn, invertInSensor);
+		dumpSensor('O', sensorOut, invertOutSensor);
+	}
+	Serial.println();
+};
+
 void LoopCore::printState() const {
 	printSensorAndState(F("track"), track, false);
 	printSensorAndState(F("\texitLeft"), sensorA, false);
 	printSensorAndState(F("\texitRight"), sensorB, false);
+	Serial.println();
+}
+
+void LoopCore::dump() const {
+	if (track == 0) {
+		return;
+	}
+	Serial.print(F("COR:"));
+	dumpSensor('T', track, invertTrack);
 	Serial.println();
 }
 
@@ -210,6 +264,16 @@ void LoopDef::printState() const {
 	Serial.println();
 }
 
+void LoopDef::dump() const {
+	left.dump(true); right.dump(false); core.dump();
+	if (relayA > 0 || relayB > 0) {
+		Serial.print(F("REL"));
+		dumpSensor('A', relayA, false);
+		dumpSensor('B', relayA, false);
+		Serial.println();
+	}
+}
+
 int Endpoint::forSensors(sensorIteratorFunc fn) const {
 	int cnt = 0;
 	callSensorFunc(sensorA, cnt, fn);
@@ -243,7 +307,7 @@ boolean Endpoint::isPrimedEnter() const{
 		return false;
 	}
 	if (sensorIn > 0) {
-		boolean ss = readS88(switchOrSensor) != invertInSensor;
+		boolean ss = readS88(sensorIn) != invertInSensor;
 		return ss;
 	}
 	if (switchOrSensor > 0 && !useSwitch) {
@@ -253,6 +317,62 @@ boolean Endpoint::isPrimedEnter() const{
 	}
 	return true;
 }
+
+boolean Endpoint::hasTriggerSensors() const {
+	return sensorIn > 0 || sensorOut > 0;
+}
+
+boolean Endpoint::sensorsActive() const {
+	if (sensorIn == 0 || sensorOut == 0) {
+		return false;
+	}
+	boolean active = false;
+	if (sensorIn > 0) {
+		active = readS88(sensorIn);
+	}
+	if ((sensorOut > 0) && (sensorIn != sensorOut)) {
+		active |= readS88(sensorOut);
+	}
+	return active;
+}
+
+// ONLY valid in
+/*
+boolean Endpoint::isFullyEntered(LoopState& s) const {
+	if (s.status != entering) {
+		return false;
+	}
+	if (isValidEnter()) {
+		// still on enter track
+		return false;
+	}
+	if (this != !s.fromEdge()) {
+		return false;
+	}
+	if (sensorIn == 0 || sensorOut == 0) {
+		return true;
+	}
+	boolean active = false;
+	if (sensorIn > 0) {
+		active = readS88(sensorIn) == invertInSensor;
+	}
+	if ((sensorOut > 0) && (sensorIn != sensorOut)) {
+		active |= (readS88(sensorOut) == invertOutSensor);
+	}
+	if (active) {
+		return false;
+	}
+	long d = s.dirSensorTime();
+	if (d == 0) {
+		return false;
+	}
+	long m = millis();
+	d = m - d;
+	boolean ret = (d > s.def().sensorThreshold);
+	s.resetDirSensor(false);
+	return ret;
+}
+*/
 
 boolean Endpoint::isValidEnter() const {
 	if (sensorA > 0 && sensorB > 0) {
@@ -530,6 +650,28 @@ void LoopDef::printAllStates() {
 	}
 }
 
+void LoopState::markDirSensor(boolean out) {
+	const LoopDef& d = def();
+	boolean x = direction == left;
+	x = x == out;
+
+	boolean hasS = x ? d.left.hasTriggerSensors() : d.right.hasTriggerSensors();
+	if (!hasS) {
+		return;
+	}
+	if (x) {
+		leftSensorTime = millis();
+		if (debugLoops) {
+			Serial.print(F("* Mark left sensor: ")); Serial.println(leftSensorTime);
+		}
+	} else {
+		rightSensorTime = millis();
+		if (debugLoops) {
+			Serial.print(F("* Mark right sensor: ")); Serial.println(rightSensorTime);
+		}
+	}
+}
+
 void LoopState::printState() const {
 	if (!def().active) {
 		return;
@@ -573,9 +715,6 @@ void processSensorTriggers(int sensor, boolean state) {
 	}
 }
 
-void loopsInLoop() {
-}
-
 void resetLoops() {
 	Serial.println("Clearing all loops");
 	for (int i = 0; i < maxLoopCount; i++) {
@@ -610,6 +749,46 @@ void relayStatus() {
 	}
 }
 
+boolean periodicTriggers() {
+	// now process zero senors that have timed out:
+	long m = millis();
+	for (int i = 0; i < maxLoopCount; i++) {
+		LoopState &st = loopStates[i];
+		LoopDef &def = loopDefinitions[i];
+		if (st.rightSensorTime > 0 && def.right.hasTriggerSensors()) {
+			long d = m - st.rightSensorTime;
+			if (debugLoops) {
+				Serial.print(F("Loop #")); Serial.print(i + 1);
+				Serial.print(F(" Right sensor timeout "));
+				Serial.println(d);
+			}
+			if (d > def.sensorTimeout) {
+				int s = def.right.sensorOut;
+				if (s == 0) {
+					s = def.right.sensorIn;
+				}
+				st.processChange(s, false);
+			}
+		}
+		if (st.leftSensorTime > 0 && def.left.hasTriggerSensors()) {
+			long d = m - st.leftSensorTime;
+			if (debugLoops) {
+				Serial.print(F("Loop #")); Serial.print(i + 1);
+				Serial.print(F(" Left sensor timeout "));
+				Serial.println(d);
+			}
+			if (d > def.sensorTimeout) {
+				int s = def.left.sensorOut;
+				if (s == 0) {
+					s = def.left.sensorIn;
+				}
+				st.processChange(s, false);
+			}
+		}
+	}
+	return true;
+}
+
 boolean loopsHandler(ModuleCmd cmd) {
 	switch (cmd) {
 	case initialize:
@@ -627,6 +806,9 @@ boolean loopsHandler(ModuleCmd cmd) {
 	case status:
 		LoopDef::printAllStates();
 		relayStatus();
+		break;
+	case periodic:
+		periodicTriggers();
 		break;
 	}
 	return true;

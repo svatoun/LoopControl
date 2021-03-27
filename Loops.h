@@ -82,6 +82,11 @@ struct Endpoint {
 
 	boolean isValidExit() const;
 
+	/*
+	boolean isFullyEntered(LoopState& s) const;
+	boolean isFullyExited(const LoopState& s) const;
+	*/
+
 	/**
 	 * Checks if the endpoint is 'primed' for loop enter.
 	 * Track must be occupied, the turnout (if defined) in a correct position, and trigger sensor (if defined)
@@ -101,6 +106,14 @@ struct Endpoint {
 
 	boolean stateB() const;
 
+	boolean sensorsActive() const;
+
+	boolean hasTriggerSensors() const;
+
+	boolean hasTrigger(int id) const {
+		return (sensorIn == id) || (sensorOut == id);
+	}
+
 	boolean hasSensor(int id) const {
 		return (sensorA == id) || (sensorB == id) || (switchOrSensor == id) ||
 			   (turnout == id) || (sensorIn == id) || (sensorOut == id) || (shortTrack == id);
@@ -111,6 +124,8 @@ struct Endpoint {
 	int forSensors(sensorIteratorFunc fn) const;
 
 	int occupiedTrackSensors() const;
+
+	void dump(boolean left) const;
 
 	Endpoint() :sensorA(0), invertA(false),
 				sensorB(0), invertB(false),
@@ -143,6 +158,7 @@ struct LoopCore {
 	LoopCore() : track(0), sensorA(0), sensorB(0), invertA(false), invertB(false), invertTrack(false) {}
 
 	int occupiedTrackSensors() const;
+	void dump() const;
 };
 
 /**
@@ -211,6 +227,7 @@ struct LoopDef {
 	boolean  active : 1;
 	int		 relayA : 3;
 	int	     relayB : 3;
+	int		 sensorTimeout;
 
 	int id() const {
 		return this - loopDefinitions;
@@ -224,13 +241,14 @@ struct LoopDef {
 		return left.hasSensor(id) || right.hasSensor(id) || core.hasSensor(id);
 	}
 
-	LoopDef() : active(false), relayA(0), relayB(0) {}
+	LoopDef() : active(false), relayA(0), relayB(0), sensorTimeout(500) {}
 
 	const Endpoint& opposite(const Endpoint& ep) const { return &ep == &left ? right : left; }
 	void defineSensors() const;
 	static void printAllStates();
 
 	int occupiedTrackSensors() const;
+	void dump() const;
 };
 
 struct LoopState {
@@ -274,15 +292,21 @@ struct LoopState {
 		}
 	}
 
+	boolean dirSensorTimeout(boolean moveOut) const;
+
 	Status status : 4;
 	Direction direction : 1;
 	long timeout;
 	long outageStart;
+	long leftSensorTime;
+	long rightSensorTime;
 
-	LoopState() : status(Status::idle), direction(left), timeout(0), outageStart(0) {}
+	LoopState() : status(Status::idle), direction(left), timeout(0), outageStart(0), leftSensorTime(0), rightSensorTime(0) {}
 
 	boolean outage() const { return outageStart > 0; };
 
+	long dirSensorTime(boolean moveOut) const { return moveOut == (direction == left) ? leftSensorTime : rightSensorTime; }
+	void markDirSensor(boolean out);
 	void switchStatus(Status s, const Endpoint& e);
 	void processChange(int sensor, boolean state);
 	void printState() const;

@@ -15,17 +15,21 @@
  *
  * Turnout straight (= 0) -> Left-to-Right
  * Turnout thrown (=1) -> Right-to-Left
+ *
  */
 const int s88ApproachCommon = 1;
 const int s88Turnout = 3;
 const int s88Loop = 2;
 
-class Baloon {
+const int s88In = 10;
+const int s88Out = 11;
+
+class BaloonSensor {
 	const LoopDef& d = loopDefinitions[0];
 	const LoopState& s = loopStates[0];
 public:
-	Baloon();
-	~Baloon();
+	BaloonSensor();
+	~BaloonSensor();
 
 	static boolean commandTest(ModuleCmd cmd);
 
@@ -43,16 +47,16 @@ public:
 	void testInterferingTrain();
 };
 
-Baloon::Baloon() {
+BaloonSensor::BaloonSensor() {
 	setup();
 }
 
-Baloon::~Baloon() {
+BaloonSensor::~BaloonSensor() {
 	Serial.println("Baloon teardown");
 	ModuleChain::invokeAll(reset);
 }
 
-void Baloon::setup() {
+void BaloonSensor::setup() {
 	Serial.println("Baloon setup");
 	LoopDef def;
 	def.relayA = 1;
@@ -64,6 +68,8 @@ void Baloon::setup() {
 	def.right.sensorA = 1;
 	def.right.turnout = 3;
 	def.right.triggerState = true;
+	def.right.sensorIn = 10;
+	def.right.sensorOut = 11;
 
 	def.core.track = 2;
 
@@ -74,54 +80,72 @@ void Baloon::setup() {
 	debugPrintSeparator();
 }
 
-boolean Baloon::commandTest(ModuleCmd cmd) {
+boolean BaloonSensor::commandTest(ModuleCmd cmd) {
 	if (cmd != test) {
 		return false;
 	}
 	ModuleChain::invokeAll(reset);
 
-	Baloon().testGoThroughLeft();
-	Baloon().testGoThroughRight();
+	BaloonSensor().testGoThroughLeft();
+	/*
+	*/
+
+	BaloonSensor().testGoThroughRight();
+
+	/*
 	Baloon().testRetractFromEntryLeft();
 	Baloon().testRetractFromEntryRight();
 	Baloon().testReverseFromMiddleLeft();
 	Baloon().testFromLeftBackAndForth();
 	Baloon().testOutageInMiddle();
 	Baloon().testInterferingTrain();
+	*/
 
 	return true;
 }
 
-void Baloon::testGoThroughLeft() {
+void BaloonSensor::testGoThroughLeft() {
 	Serial.println(F("Baloon: go through left"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
 	assert(F("must approach"), s.status == approach);
+	assert(F("right"), s.direction == right);
 
 	overrideS88(s88Loop, true, true);
 	tick();
-	assert(F("must enter"), s.status == entering);
-	assert(F("relay OFF"), !isRelayOn(1));
-
 	overrideS88(s88ApproachCommon, true, false);
 	tick();
-	assert(F("moving not armed"), s.status == moving);
-	assert(F("relay OFF"), !isRelayOn(1));
-
 	overrideS88(s88Turnout, true, true);
 	tick();
-	assert(F("armed"), s.status == armed);
-	assert(F("relay ON"), isRelayOn(1));
+	assert(F("still unarmed"), s.status == moving);
+	assert(F("right"), s.direction == right);
 
+	overrideS88(s88Out, true, true);
+	tick();
+	assert(F("armed"), s.status == armed);
+	assert(F("relay ON 1"), isRelayOn(1));
+
+	overrideS88(s88Out, true, false);
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
 	assert(F("exiting"), s.status == exiting);
-	assert(F("relay ON"), isRelayOn(1));
 
+	assert(F("relay ON 2"), isRelayOn(1));
 	overrideS88(s88Loop, true, false);
+	overrideS88(s88Out, true, true);
+	tick();
+	assert(F("exit delay 1"), s.status == exiting);
+	assert(F("relay ON exited"), isRelayOn(1));
+
+	overrideS88(s88Out, true, false);
+	tick();
+	assert(F("exit delay 1"), s.status == exiting);
+	delay(300);
+	tick();
+	assert(F("exit delay 2"), s.status == exiting);
+	delay(300);
 	tick();
 	assert(F("exited"), s.status == exited);
-	assert(F("relay ON exited"), isRelayOn(1));
 
 	overrideS88(s88ApproachCommon, true, false);
 	tick();
@@ -129,7 +153,7 @@ void Baloon::testGoThroughLeft() {
 	assert(F("relay OFF"), !isRelayOn(1));
 }
 
-void Baloon::testGoThroughRight() {
+void BaloonSensor::testGoThroughRight() {
 	Serial.println(F("Baloon: go through right"));
 
 	overrideS88(s88Turnout, true, true);
@@ -139,23 +163,61 @@ void Baloon::testGoThroughRight() {
 
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
-	assert(F("must approach"), s.status == approach);
-	assert(F("relay ON"), isRelayOn(1));
+	assert(F("no approach"), s.status == idle);
+	assert(F("relay OFF 0"), !isRelayOn(1));
+	assert(F("right"), s.direction == left);
+
+	overrideS88(s88In, true, true);
+	tick();
+	assert(F("must approach 2"), s.status == approach);
+	assert(F("relay ON 1"), isRelayOn(1));
 
 	overrideS88(s88Loop, true, true);
 	tick();
 	assert(F("must enter"), s.status == entering);
-	assert(F("relay ON"), isRelayOn(1));
+	assert(F("relay ON 2"), isRelayOn(1));
 
 	overrideS88(s88ApproachCommon, true, false);
 	tick();
 	assert(F("moving not armed"), s.status == moving);
-	assert(F("relay ON"), isRelayOn(1));
+	assert(F("relay ON 3"), isRelayOn(1));
 
 	overrideS88(s88Turnout, true, false);
 	tick();
+	assert(F("still moving 4"), s.status == moving);
+	assert(F("relay ON 4"), isRelayOn(1));
+
+	// over timeout, but sensor still active
+	delay(600);
+	tick();
+	assert(F("still moving 5"), s.status == moving);
+	assert(F("relay ON 6"), isRelayOn(1));
+
+	// swap sensors:
+	overrideS88(s88In, true, false);
+	overrideS88(s88Out, true, true);
+	tick();
+	// let the out sensor still interact
+	delay(600);
+	tick();
+	assert(F("still moving 6"), s.status == moving);
+	assert(F("relay ON 6"), isRelayOn(1));
+
+	overrideS88(s88Out, true, false);
+	tick();
+	assert(F("still moving 7"), s.status == moving);
+	assert(F("relay ON 7"), isRelayOn(1));
+	delay(300);
+	tick();
+	assert(F("still moving 8"), s.status == moving);
+	assert(F("relay ON 8"), isRelayOn(1));
+
+	// finally timeout!
+	delay(300);
+	tick();
+	tick();
 	assert(F("armed"), s.status == armed);
-	assert(F("relay OFF"), !isRelayOn(1));
+	assert(F("relay OFF 0"), !isRelayOn(1));
 
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -174,7 +236,7 @@ void Baloon::testGoThroughRight() {
 }
 
 // enter the loop, then go back and away
-void Baloon::testRetractFromEntryLeft() {
+void BaloonSensor::testRetractFromEntryLeft() {
 	Serial.println(F("Baloon: retract left"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -196,7 +258,7 @@ void Baloon::testRetractFromEntryLeft() {
 }
 
 // enter the loop, then go back and away
-void Baloon::testRetractFromEntryRight() {
+void BaloonSensor::testRetractFromEntryRight() {
 	Serial.println(F("Baloon: retract right"));
 
 	overrideS88(s88Turnout, true, true);
@@ -228,7 +290,7 @@ void Baloon::testRetractFromEntryRight() {
 }
 
 // Enter fully the loop left-to right, then reverse and return back.
-void Baloon::testReverseFromMiddleLeft() {
+void BaloonSensor::testReverseFromMiddleLeft() {
 	Serial.println(F("Baloon: left reverse from middle"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -262,7 +324,7 @@ void Baloon::testReverseFromMiddleLeft() {
 // Enter the loop, then reverse and go back a little, then go forward to the center
 // then back again, then forward to the exiting and back to centre
 // and to exited and back again to centre. And finally exit
-void Baloon::testFromLeftBackAndForth() {
+void BaloonSensor::testFromLeftBackAndForth() {
 	Serial.println(F("Baloon: from left, back and forth"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -337,11 +399,11 @@ void Baloon::testFromLeftBackAndForth() {
 	assert(F("relay ON 9"), isRelayOn(1));
 }
 
-void Baloon::testReverseFromMiddleRight() {
+void BaloonSensor::testReverseFromMiddleRight() {
 
 }
 
-void Baloon::testOutageInMiddle() {
+void BaloonSensor::testOutageInMiddle() {
 	Serial.println(F("Baloon: middle outage"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -383,7 +445,7 @@ void Baloon::testOutageInMiddle() {
 	assert(F("toRight"), s.direction == right);
 }
 
-void Baloon::testInterferingTrain() {
+void BaloonSensor::testInterferingTrain() {
 	Serial.println(F("Baloon: interfering train"));
 	overrideS88(s88ApproachCommon, true, true);
 	tick();
@@ -422,9 +484,9 @@ void Baloon::testInterferingTrain() {
 	assert(F("relay OFF"), !isRelayOn(1));
 }
 
-#ifdef __test_baloon
+#ifdef __test_baloon_sensor
 
-ModuleChain baloonTestModule("ballonTest", 99, &Baloon::commandTest);
+ModuleChain baloonSesnorModule("ballonSensor", 99, &BaloonSensor::commandTest);
 
 #endif
 
