@@ -72,7 +72,7 @@ void commandEndpoint() {
 	inputPos++;
 	if (*inputPos == '-' || *inputPos == '~' || *inputPos == '!') {
 		ptr->triggerState = false;
-	} else if (*inputPos == '+') {
+	} else if ((*inputPos == '+') || (*inputPos == '*')) {
 		ptr->triggerState = true;
 	} else if (*inputPos == ':') {
 		ptr->triggerState = false;
@@ -116,7 +116,7 @@ void commandEndpoint() {
 			inputPos++;
 		}
 		int sno = nextNumber();
-		if (sno < 1 || sno > maxSensorCount) {
+		if (sno < 0 || sno > maxSensorCount) {
 			Serial.println("Invalid sensor number");
 			return;
 		}
@@ -187,7 +187,7 @@ void commandCore() {
 			inputPos++;
 		}
 		int sno = nextNumber();
-		if (sno < 1 || sno > maxSensorCount) {
+		if (sno < 0 || sno > maxSensorCount) {
 			Serial.println("Invalid sensor number");
 			return;
 		}
@@ -231,7 +231,7 @@ void commandRelay() {
 		}
 		inputPos++;
 		int sno = nextNumber();
-		if (sno < 1 || sno > maxRelayCount) {
+		if (sno < 0 || sno > maxRelayCount) {
 			Serial.println("Invalid relay");
 			return;
 		}
@@ -296,6 +296,31 @@ void commandFinish() {
 	promptString = NULL;
 }
 
+void commandDump() {
+	for (int i = 0; i < maxLoopCount; i++) {
+		const LoopDef& d = loopDefinitions[i];
+		if (!d.active) {
+			continue;
+		}
+		Serial.print(F("DEF:")); Serial.println(i + 1);
+		d.dump();
+		Serial.println(F("FIN:"));
+	}
+}
+
+void commandDelete() {
+	int ln = nextNumber();
+	if (ln < 0) {
+		Serial.println(F("Syntax error"));
+		return;
+	}
+	if ((ln <  1) || (ln > maxLoopCount)) {
+		Serial.println(F("Invalid number"));
+	}
+	loopDefinitions[ln - 1] = LoopDef();
+	loopStates[ln - 1] = LoopState();
+}
+
 
 void initCommands() {
   registerLineCommand("DEF", &commandLoop);
@@ -304,6 +329,8 @@ void initCommands() {
   registerLineCommand("REL", &commandRelay);
   registerLineCommand("CAN", &commandCancel);
   registerLineCommand("FIN", &commandFinish);
+  registerLineCommand("DEL", &commandDelete);
+  registerLineCommand("DMP", &commandDump);
 }
 
 boolean commandHandler(ModuleCmd cmd) {
