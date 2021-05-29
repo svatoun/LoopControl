@@ -8,14 +8,15 @@
 #ifndef S88_H_
 #define S88_H_
 
-const int LOAD_INT_0      = 2 ;        // 2 LOAD 0 int
-const int CLOCK_INT_1     = 3 ;        // 3 CLOCK 1 int
-const int DATA_IN         = 4 ;        // data in
-const int DATA_OUT        = 5 ;        // data out
+#include "PinOut.h"
 
 const int s88MaxSize	  = 32;		   // max number of 8bit S88 modules
 
+const int s88MaxSize_bytes = s88MaxSize;
+
+
 const int maxSensorCount  = 8 * 3;	   // maximum number of sensors
+const int maxSensorId = s88MaxSize * 8;
 
 /**
  * Milliseconds the sensor's state must hold in order to report a change.

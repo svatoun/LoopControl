@@ -10,7 +10,10 @@
 #include "S88.h"
 #include "Common.h"
 #include "Utils.h"
+#include "Terminal.h"
 
+byte s88Sensorstates[s88MaxSize_bytes] = { 0 };
+boolean s88BusChanged = false;
 
 // Shamelessly copied from https://sites.google.com/site/sidloweb/elektrika/s88-ir-detektor
 // Copyright (c) Sidlo
@@ -143,6 +146,17 @@ void s88InLoop() {
 
 // ==================== Routines run in the interrupt ======================
 void storeS88Bit(int sensorId, int state, boolean skipOverride) {
+	byte stateIdx = (sensorId - 1) / 8;
+	byte stateMask = 1 << ((sensorId -1) % 8);
+
+	boolean cur = (s88Sensorstates[stateIdx] & stateMask) > 0;
+	if (cur != state) {
+		s88BusChanged = true;
+	}
+	s88Sensorstates[stateIdx] = state ?
+		s88Sensorstates[stateIdx] | stateMask :
+		s88Sensorstates[stateIdx] & ~stateMask;
+
 	for (int i = 0; i < maxSensorCount; i++) {
 		Sensor& s = sensors[i];
 
@@ -366,12 +380,70 @@ void cmdPrintSensors() {
 	s88Status();
 }
 
+boolean s88MonitorActive = false;
+
+void s88MonitorCallback(char c) {
+	if (c == 'q' || c == 'Q') {
+		s88MonitorActive = false;
+		charModeCallback = NULL;
+		Serial.println();
+		Serial.println();
+		resetTerminal();
+	}
+}
+
+void s88MonitorDoPrint() {
+	Serial.print((char)0x0d);
+	for (byte i = 0; i < sizeof(s88Sensorstates); i++) {
+		byte x = s88Sensorstates[i];
+		if (x < 0x10) {
+			Serial.print('0');
+		}
+		Serial.print(x, HEX); Serial.print(' ');
+	}
+}
+
+void s88MonitorPrint() {
+	if (!s88BusChanged || !s88MonitorActive) {
+		return;
+	}
+	s88BusChanged = false;
+	s88MonitorDoPrint();
+}
+
+void cmdMonitorS88() {
+	s88MonitorActive = true;
+	charModeCallback = &s88MonitorCallback;
+
+	Serial.println(F("                                  100                                   200                     "));
+	Serial.println(F("00 08 16 24 32 40 48 56 64 72 80 96 04 12 20 28 36 44 52 60 68 76 84 92 00 08 16 24 32 40 48 56"));
+	for (byte i = 0; i < sizeof(s88Sensorstates); i++) Serial.print(F("---")); Serial.println();
+	s88MonitorDoPrint();
+}
+
+
+void setupS88Support() {
+	registerLineCommand("SEN", &cmdSetSensors);
+	registerLineCommand("RLS", &cmdReleaseSensors);
+	registerLineCommand("S88", &cmdPrintSensors);
+	registerLineCommand("S8M", &cmdMonitorS88);
+
+	pinMode(LOAD_INT_0, INPUT_PULLUP) ;
+	attachInterrupt(digitalPinToInterrupt(LOAD_INT_0), s88LoadInt, RISING);
+
+	pinMode(CLOCK_INT_1, INPUT_PULLUP) ;
+	attachInterrupt(digitalPinToInterrupt(CLOCK_INT_1), s88ClockInt, RISING) ;
+
+	pinMode(DATA_IN, INPUT) ;
+
+	pinMode(DATA_OUT, OUTPUT) ;
+	digitalWrite(DATA_OUT, LOW) ;
+}
+
 boolean s88ModuleHandler(ModuleCmd cmd) {
   switch (cmd) {
     case initialize:
-    	registerLineCommand("SEN", &cmdSetSensors);
-    	registerLineCommand("RLS", &cmdReleaseSensors);
-    	registerLineCommand("S88", &cmdPrintSensors);
+    	setupS88Support();
       break;
     case eepromLoad:
       return loadEEPROMSensors();
@@ -388,6 +460,7 @@ boolean s88ModuleHandler(ModuleCmd cmd) {
       break;
     case periodic:
     	s88InLoop();
+    	s88MonitorPrint();
     	break;
   }
   return true;

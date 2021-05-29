@@ -11,7 +11,7 @@
 
 const char* defaultPromptString = "@ > ";
 
-const boolean debugInfra;
+const boolean debugInfra = false;
 
 const int MAX_LINE = 60;
 boolean interactive = true;
@@ -76,6 +76,14 @@ void registerLineCommand(const char* aCmd, void (*aHandler)()) {
 }
 
 void processLineCommand() {
+  inputPos = &inputLine[0];
+  while (*inputPos == ' ' || *inputPos == '\t') {
+	  Serial.print("Char: "); Serial.println(*inputPos);
+	  inputPos++;
+  }
+  if (*inputPos == '#' || *inputPos == 0) {
+	  return;
+  }
   inputEnd = inputPos;
   char *pos = strchr(inputLine, ':');
   if (pos == NULL) {
@@ -176,7 +184,7 @@ int nextNumber() {
 
   char *p = strchr(inputPos, ':');
   if (p == NULL) {
-    p = inputEnd - 1;
+	p = strlen(p) + p - 1;
   } else {
     *p = 0;
   }

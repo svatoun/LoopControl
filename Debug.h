@@ -14,19 +14,19 @@ const int debugLow = 0;
 const int debugControl = 1;     // debug control commands
 const int debugLed = 0;
 const int debugMgmt = 0;
-const int debugS88 = 0;
+const int debugS88 = 1;
 const int debugS88Low = 0;
 const int numChannels = 8;      // number of sensors used. Max 5 on Arduino UNO, 8 on Nano.
 
-const int debugLoops = 1;
-const int debugTransitions = 1;
+const int debugLoops = 0;
+const int debugTransitions = 0;
 const int debugRelays = 1;
 
 #undef __test_s88
 #define __test_loop
 
 #undef __test_baloon
-#define __test_station
+#undef __test_station
 #undef __test_baloon_sensor
 
 void assert(const char* msg, boolean condition);

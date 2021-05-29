@@ -66,7 +66,7 @@ Station::~Station() {
 void Station::setup() {
 	Serial.println("Station setup");
 	LoopDef def;
-	def.relayA = 1;
+	def.left.relay = 1;
 
 	def.left.sensorA = 1;
 	def.left.turnout = 3;
@@ -74,7 +74,7 @@ void Station::setup() {
 
 	def.right.sensorA = 4;
 
-	def.core.track = 2;
+	def.core.trackA = 2;
 
 	defineLoop(0, def);
 	tick();

@@ -12,6 +12,8 @@
 
 long outageTimeout = 5 * 60 * 1000; // 5 minutes
 
+boolean logTransitions = true;
+
 /**
  * This is a state automaton for the loop. It works with the following conditions
  *
@@ -51,7 +53,7 @@ long outageTimeout = 5 * 60 * 1000; // 5 minutes
 
 void LoopState::maybeArm(const Endpoint& via) {
 	const LoopDef& d = def();
-	if (!d.core.isPrimed()) {
+	if (!d.core.occupied()) {
 		switchStatus(idle, via);
 		return;
 	}
@@ -73,7 +75,9 @@ void LoopState::maybeArm(const Endpoint& via) {
 			return;
 		}
 	}
-	switchStatus(armed, via);
+	if (d.core.isDirectionPrimed(direction == left)) {
+		switchStatus(armed, via);
+	}
 }
 
 void LoopState::processApproach(int sensor, const Endpoint& ep) {
@@ -120,28 +124,28 @@ void LoopState::switchStatus(Status s, const Endpoint& ep) {
 	Direction oldDirection = direction;
 
 	status = s;
-	if (debugTransitions) {
-		Serial.print(F("Change status: ")); Serial.println(statName(s));
+	if (logTransitions) {
+		Serial.print('#'); Serial.print(id());
+		Serial.print(F(": Change status: ")); Serial.print(statName(status)); Serial.print(F(" => ")); Serial.print(statName(s));
+		Serial.print(F(", Direction: ")); Serial.println(direction ? F("left") : F("right"));
 	}
 	const LoopDef& d = def();
 
 	switch (s) {
 		case approach:
-			switchRelay(d.relayA, fromEdge().triggerState);
-			switchRelay(d.relayB, fromEdge().triggerState);
+			switchRelay(fromEdge().relay, fromEdge().relayTriggerState);
 			markDirSensor(false);
 			break;
 
 		case armed:
 			direction = directionTo(ep);
 			markDirSensor(true);
-			switchRelay(d.relayA, toEdge().triggerState);
-			switchRelay(d.relayB, toEdge().triggerState);
+			switchRelay(toEdge().relay, toEdge().relayTriggerState);
 			break;
 
 		case idle:
-			switchRelay(d.relayA, false);
-			switchRelay(d.relayB, false);
+			switchRelay(d.left.relay, d.left.relayOffState);
+			switchRelay(d.right.relay, d.right.relayOffState);
 
 			maybeApproach(oldStatus, d.opposite(ep));
 			break;
@@ -157,7 +161,7 @@ void LoopState::switchStatus(Status s, const Endpoint& ep) {
 			break;
 	}
 	if (status == idle) {
-		if (debugTransitions) {
+		if (logTransitions) {
 			Serial.println(F("Clearing trigger sensors"));
 		}
 		leftSensorTime = rightSensorTime = 0;
@@ -365,15 +369,29 @@ void LoopState::processArmed(int sensor, const Endpoint& to) {
 	}
 	if (to.changedOccupied(sensor, true)) {
 		switchStatus(exiting, to);
-	} else if (!to.isPrimedExit()) {
+		return;
+	}
+	boolean revert = false;
+	if (to.isValidExit()) {
+		if (to.hasTriggerSensors() && dirSensorTimeout(true)) {
+			if (debugTransitions) {
+				Serial.println(F("Trigger sensor timeout"));
+			}
+			revert = true;
+		}
+	}
+	if (!to.isPrimedExit()) {
 		if (debugTransitions) {
 			Serial.println(F("Exit became invalid"));
 		}
+		revert = true;
+	}
+	if (revert) {
 		// still moving in the _SAME_ direction; exit became invalid for
 		// some reason. Heading to the exit, but just in case turn off the relay.
 		if (to.triggerState) {
-			switchRelay(d.relayA, false);
-			switchRelay(d.relayB, false);
+			switchRelay(d.left.relay, d.left.relayOffState);
+			switchRelay(d.right.relay, d.right.relayOffState);
 		}
 		switchStatus(moving, d.opposite(to));
 		return;
@@ -449,7 +467,8 @@ void LoopState::processChange(int sensor, boolean s) {
 			}
 			long delta = millis() - outageStart;
 			if (delta > outageTimeout) {
-				Serial.println(F("Outage timeout => idle"));
+				Serial.print('#'); Serial.print(id());
+				Serial.println(F(": Outage timeout => idle"));
 				switchStatus(idle, d.left);
 			}
 			return;
@@ -465,6 +484,10 @@ void LoopState::processChange(int sensor, boolean s) {
 			break;
 		case approach:
 			processApproach(sensor, fromEdge());
+			break;
+
+		case readyEnter:
+			processReadyEnter(sensor, fromEdge());
 			break;
 
 		case entering:

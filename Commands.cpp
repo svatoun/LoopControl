@@ -44,6 +44,9 @@ void commandLoop() {
 	}
 	editedLoopId = loop;
 	editedLoop = loopDefinitions[loop];
+	if (!editedLoop.active) {
+		editedLoop = LoopDef();
+	}
 
 	Serial.println(F("Initial state: "));
 	editedLoop.printState();
@@ -96,7 +99,7 @@ void commandEndpoint() {
 		case 'o': case 'O': // OUT sensor
 		case 's': case 'S': // IN+OUT sensor
 		case 'h': case 'H': // sHort track, but 's' is already taken
-		case 't': case 'T': // track
+		case 't': case 'T': // Turnout
 			break;
 		default:
 			Serial.println(F("Sensor not in [abhiost]"));
@@ -116,7 +119,7 @@ void commandEndpoint() {
 			inputPos++;
 		}
 		int sno = nextNumber();
-		if (sno < 0 || sno > maxSensorCount) {
+		if (sno < 0 || sno > maxSensorId) {
 			Serial.println("Invalid sensor number");
 			return;
 		}
@@ -187,22 +190,18 @@ void commandCore() {
 			inputPos++;
 		}
 		int sno = nextNumber();
-		if (sno < 0 || sno > maxSensorCount) {
+		if (sno < 0 || sno > maxSensorId) {
 			Serial.println("Invalid sensor number");
 			return;
 		}
 		switch (c) {
 		case 'a': case 'A':
-			ptr->sensorA = sno;
+			ptr->trackA = sno;
 			ptr->invertA = invert;
 			break;
 		case 'b': case 'B':
-			ptr->sensorB = sno;
+			ptr->trackB = sno;
 			ptr->invertB = invert;
-			break;
-		case 't': case 'T':
-			ptr->track= sno;
-			ptr->invertTrack = invert;
 			break;
 		default:
 			Serial.println(F("Error."));
@@ -216,9 +215,14 @@ void commandCore() {
 void commandRelay() {
 	do {
 		char c = *inputPos;
+		Endpoint* e;
+		Serial.println(c);
 		switch (c) {
-		case 'a': case 'A':
-		case 'b': case 'B':
+		case 'a': case 'A': case 'L': case 'l':
+			e = &editedLoop.left;
+			break;
+		case 'b': case 'B': case 'R': case 'r':
+			e = &editedLoop.right;
 			break;
 		default:
 			Serial.println(F("Relay not in [ab]"));
@@ -235,16 +239,36 @@ void commandRelay() {
 			Serial.println("Invalid relay");
 			return;
 		}
-		switch (c) {
-		case 'a': case 'A':
-			editedLoop.relayA = sno;
-			break;
-		case 'b': case 'B':
-			editedLoop.relayB = sno;
-			break;
-		default:
-			Serial.println(F("Error."));
-			return;
+		e->relay = sno;
+		e->relayTriggerState = true;
+		e->relayOffState = false;
+		if (*inputPos) {
+			switch (*inputPos) {
+			case '1': case '+': case 'H':
+				e->relayTriggerState = true;
+				break;
+			case '0': case '-': case 'L':
+				e->relayTriggerState = false;
+				break;
+			default:
+				Serial.println("Invalid relay state");
+				return;
+			}
+			inputPos++;
+			switch (*inputPos) {
+			case '1': case '+': case 'H':
+				e->relayOffState = true;
+				break;
+			case '0': case '-': case 'L':
+				e->relayOffState = false;
+				break;
+			case 0:
+				break;
+			default:
+				Serial.println("Invalid relay state");
+				return;
+			}
+			inputPos++;
 		}
 	} while (*inputPos);
 	Serial.println(F("Relay defined"));
@@ -284,8 +308,13 @@ void commandFinish() {
 		commandCancel();
 		return;
 	}
-	if (editedLoop.relayA == 0 && editedLoop.relayB == 0) {
+	if (editedLoop.left.relay== 0 && editedLoop.right.relay== 0) {
 		Serial.print(F("Invalid, no relays"));
+		commandCancel();
+		return;
+	}
+	if ((editedLoop.left.relay == editedLoop.right.relay) && (editedLoop.left.relayTriggerState == editedLoop.right.relayTriggerState)) {
+		Serial.print(F("Invalid, relay doesn't change"));
 		commandCancel();
 		return;
 	}
@@ -304,7 +333,7 @@ void commandDump() {
 		}
 		Serial.print(F("DEF:")); Serial.println(i + 1);
 		d.dump();
-		Serial.println(F("FIN:"));
+		Serial.println(F("FIN"));
 	}
 }
 
@@ -319,6 +348,37 @@ void commandDelete() {
 	}
 	loopDefinitions[ln - 1] = LoopDef();
 	loopStates[ln - 1] = LoopState();
+}
+
+boolean monitorActive = false;
+
+void commandMonitor() {
+	monitorActive = true;
+}
+
+/**
+ * ...|..|...
+ * ..I|..|...
+ * ++I|..|...
+ *
+ * Monitor state of a loop:
+ * ABTIOS-- --ABTIOS
+ */
+
+void monitorPrint() {
+	if (!monitorActive) {
+		return;
+	}
+	for (int i = 0; i < maxLoopCount; i++) {
+		const LoopDef& d = loopDefinitions[i];
+		const LoopState& s = loopStates[i];
+		if (i > 0) {
+			Serial.print('\t');
+		}
+		Serial.print(i + 1);
+		s.monitorPrint();
+	}
+	Serial.print((char)0x0d);
 }
 
 
@@ -337,6 +397,9 @@ boolean commandHandler(ModuleCmd cmd) {
 	switch (cmd) {
 	case initialize:
 		initCommands();
+		break;
+	case periodic:
+		monitorPrint();
 		break;
 	}
 	return true;

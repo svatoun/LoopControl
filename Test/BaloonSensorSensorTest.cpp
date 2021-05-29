@@ -59,7 +59,7 @@ BaloonSensor::~BaloonSensor() {
 void BaloonSensor::setup() {
 	Serial.println("Baloon setup");
 	LoopDef def;
-	def.relayA = 1;
+	def.right.relay = 1;
 
 	def.left.sensorA = 1;
 	def.left.turnout = 3;
@@ -71,7 +71,7 @@ void BaloonSensor::setup() {
 	def.right.sensorIn = 10;
 	def.right.sensorOut = 11;
 
-	def.core.track = 2;
+	def.core.trackA = 2;
 
 	defineLoop(0, def);
 	tick();

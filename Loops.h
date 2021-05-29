@@ -67,10 +67,26 @@ struct Endpoint {
 	boolean invertA : 1;
 	boolean invertB : 1;
 	boolean invertShortTrack: 1;
+
+	/**
+	 * Inverts 'in' sensor semantics
+	 */
 	boolean invertInSensor : 1;
+
+	/**
+	 * Inverts 'out' sensor semantics
+	 */
 	boolean invertOutSensor : 1;
+
+	/**
+	 * If true, the endpoint is selected in '0' turnout state.
+	 */
 	boolean invertTurnout : 1;
 	boolean triggerState : 1;
+
+	byte 	relay : 3;
+	boolean relayTriggerState : 1;
+	boolean relayOffState : 1;
 
 	/**
 	 * Checks if the endpoint is 'primed' for exit. The adjacent track must not be occupied, the turnout must
@@ -127,6 +143,8 @@ struct Endpoint {
 
 	void dump(boolean left) const;
 
+	void monitorPrint() const;
+
 	Endpoint() :sensorA(0), invertA(false),
 				sensorB(0), invertB(false),
 				switchOrSensor(0), invertSensor(false), useSwitch(false),
@@ -134,28 +152,28 @@ struct Endpoint {
 				sensorIn(0), invertInSensor(false),
 				sensorOut(0), invertOutSensor(false),
 				shortTrack(0), invertShortTrack(false),
-
+				relay(0), relayTriggerState(true), relayOffState(false),
 				triggerState(false) {}
 };
 
 struct LoopCore {
-	int track : 8;
-	int sensorA : 8;
-	int sensorB : 8;
+	int trackA : 8;
+	int trackB : 8;
 
-	boolean invertTrack : 1;
 	boolean invertA  : 1;
 	boolean invertB  : 1;
 
+	boolean isDirectionPrimed(boolean left) const;
 	boolean isPrimed() const;
 	boolean hasChanged() const;
 	boolean hasSensor(int id) const {
-		return (track == id) || (sensorA == id) || (sensorB == id);
+		return (trackA == id) || (trackB == id);
 	}
 	boolean occupied() const;
 	void printState() const;
+	void monitorPrint() const;
 	int forSensors(sensorIteratorFunc fn) const;
-	LoopCore() : track(0), sensorA(0), sensorB(0), invertA(false), invertB(false), invertTrack(false) {}
+	LoopCore() : trackA(0), trackB(0), invertA(false), invertB(false) {}
 
 	int occupiedTrackSensors() const;
 	void dump() const;
@@ -188,6 +206,11 @@ enum Status {
 	 * Entering the loop from the right side. In the edge track
 	 */
 	approach,
+
+	/**
+	 * Ready to enter, the relays are switched as necessary.
+	 */
+	readyEnter,
 
 	/**
 	 * Has entered the loop from the right side, moving to the left. Partially in the edge & core tracks
@@ -225,8 +248,6 @@ struct LoopDef {
 	LoopCore	 core;
 
 	boolean  active : 1;
-	int		 relayA : 3;
-	int	     relayB : 3;
 	int		 sensorTimeout;
 
 	int id() const {
@@ -234,6 +255,7 @@ struct LoopDef {
 	}
 
 	void printState() const;
+	void monitorPrint() const;
 
 	int forSensors(sensorIteratorFunc fn) const;
 
@@ -241,7 +263,7 @@ struct LoopDef {
 		return left.hasSensor(id) || right.hasSensor(id) || core.hasSensor(id);
 	}
 
-	LoopDef() : active(false), relayA(0), relayB(0), sensorTimeout(500) {}
+	LoopDef() : active(false), sensorTimeout(500) {}
 
 	const Endpoint& opposite(const Endpoint& ep) const { return &ep == &left ? right : left; }
 	void defineSensors() const;
@@ -310,15 +332,18 @@ struct LoopState {
 	void switchStatus(Status s, const Endpoint& e);
 	void processChange(int sensor, boolean state);
 	void printState() const;
+	void monitorPrint() const;
 
 	void processIdle(int sensor);
 	void processApproach(int sensor, const Endpoint& ep);
+	void processReadyEnter(int sensor, const Endpoint& ep);
 	void processEntering(int sensor, const Endpoint& from);
 	void processMoving(int sensor, const Endpoint& from);
 	void processArmed(int sensor, const Endpoint& to);
 	void processExiting(int sensor, const Endpoint& to);
 	void processExited(int sensor, const Endpoint& to);
 
+	void maybeReadyEnter(const Endpoint& via);
 	void maybeArm(const Endpoint& via);
 	void maybeApproach(Status prevStatus, const Endpoint& from);
 };
