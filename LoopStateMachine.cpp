@@ -612,6 +612,8 @@ void LoopState::handleOutage() {
 
 	if ((status == approach || status == exited)) {
 		threshold = outageAproachExitTimeout;
+	} else if (status == readyEnter && (!fromEdge().hasTriggerSensors() || !fromEdge().isPrimedEnter())) {
+		threshold = outageAproachExitTimeout;
 	} else {
 		threshold = outageTimeout;
 	}

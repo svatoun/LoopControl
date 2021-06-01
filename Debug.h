@@ -16,6 +16,7 @@ const int debugLed = 0;
 const int debugMgmt = 0;
 const int debugS88 = 1;
 const int debugS88Low = 0;
+const int debugS88Debounce = 0;
 const int numChannels = 8;      // number of sensors used. Max 5 on Arduino UNO, 8 on Nano.
 
 const int debugLoops = 0;

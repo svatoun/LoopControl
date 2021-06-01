@@ -318,8 +318,8 @@ void LoopDef::dump() const {
 
 int Endpoint::forSensors(sensorIteratorFunc fn) const {
 	int cnt = 0;
-	callSensorFunc(sensorA, cnt, fn, true);
-	callSensorFunc(sensorB, cnt, fn, true);
+	callSensorFunc(sensorA, cnt, fn, false);
+	callSensorFunc(sensorB, cnt, fn, false);
 	callSensorFunc(sensorIn, cnt, fn, true);
 	callSensorFunc(sensorOut, cnt, fn, true);
 	callSensorFunc(shortTrack, cnt, fn, false);
@@ -707,11 +707,15 @@ void LoopState::markDirSensor(boolean out) {
 	}
 	if (x) {
 		leftSensorTime = millis();
+		suspendS88(d.left.sensorIn);
+		suspendS88(d.left.sensorOut);
 		if (debugLoops) {
 			Serial.print(F("* Mark left sensor: ")); Serial.println(leftSensorTime);
 		}
 	} else {
 		rightSensorTime = millis();
+		suspendS88(d.right.sensorIn);
+		suspendS88(d.right.sensorOut);
 		if (debugLoops) {
 			Serial.print(F("* Mark right sensor: ")); Serial.println(rightSensorTime);
 		}
@@ -857,12 +861,13 @@ boolean periodicTriggers() {
 		}
 		if (st.rightSensorTime > 0 && def.right.hasTriggerSensors()) {
 			long d = m - st.rightSensorTime;
-			if (debugLoops) {
-				Serial.print(F("Loop #")); Serial.print(i + 1);
-				Serial.print(F(" Right sensor timeout "));
-				Serial.println(d);
-			}
 			if (d > def.sensorTimeout) {
+				if (logTransitions) {
+					Serial.print(F("Loop #")); Serial.print(i + 1);
+					Serial.print(F(" Right sensor timeout "));
+					Serial.println(d);
+				}
+				/*
 				int s = def.right.sensorOut;
 				boolean f = def.right.invertOutSensor;
 				if (s == 0) {
@@ -870,17 +875,21 @@ boolean periodicTriggers() {
 					f = def.right.invertInSensor;
 				}
 				st.processChange(s, f);
+				*/
+				resumeS88(def.right.sensorIn);
+				resumeS88(def.right.sensorOut);
 				st.rightSensorTime = 0;
 			}
 		}
 		if (st.leftSensorTime > 0 && def.left.hasTriggerSensors()) {
 			long d = m - st.leftSensorTime;
-			if (debugLoops) {
-				Serial.print(F("Loop #")); Serial.print(i + 1);
-				Serial.print(F(" Left sensor timeout "));
-				Serial.println(d);
-			}
 			if (d > def.sensorTimeout) {
+				if (logTransitions) {
+					Serial.print(F("Loop #")); Serial.print(i + 1);
+					Serial.print(F(" Left sensor timeout "));
+					Serial.println(d);
+				}
+				/*
 				int s = def.left.sensorOut;
 				boolean f = def.left.invertOutSensor;
 				if (s == 0) {
@@ -888,6 +897,9 @@ boolean periodicTriggers() {
 					boolean f = def.left.invertInSensor;
 				}
 				st.processChange(s, f);
+				*/
+				resumeS88(def.left.sensorIn);
+				resumeS88(def.left.sensorOut);
 				st.leftSensorTime = 0;
 			}
 		}

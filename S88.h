@@ -43,9 +43,11 @@ boolean freeSensor(int sensor);
 int forSensors(sensorIteratorFunc fn);
 boolean s88Changed(int sensor);
 void overrideS88(int sensorId, boolean override, boolean state);
+void suspendS88(int sensorId);
+void resumeS88(int sensorId);
 
 struct SensorTiming {
-	int trackUpDebounce = 1;
+	int trackUpDebounce = 300;
 	int trackDownDebounce = 800;
 
 	int triggerUpDebounce = 5;
@@ -91,6 +93,10 @@ struct Sensor {
 	 */
 	boolean	changeProcessing : 1;
 
+	boolean suspendedState : 1;
+
+	boolean suspended : 1;
+
 	/**
 	 *
 	 */
@@ -116,8 +122,10 @@ struct Sensor {
 	 */
 	byte sensorId = 0;
 
-	Sensor() : reportState(false), s88State(false), triggerChange(false), changing(false), changeProcessing(false), overriden(false), triggerSensor(false) {}
-	Sensor(int id) : sensorId(id), reportState(false), s88State(false), triggerChange(false), changing(false), changeProcessing(false), overriden(false), triggerSensor(false) {}
+	Sensor() : reportState(false), s88State(false), triggerChange(false), changing(false), changeProcessing(false), overriden(false),
+			triggerSensor(false), suspended(false), suspendedState(false) {}
+	Sensor(int id) : sensorId(id), reportState(false), s88State(false), triggerChange(false), changing(false), changeProcessing(false), overriden(false),
+			triggerSensor(false), suspended(false), suspendedState(false) {}
 	Sensor(const SensorData& data);
 
 	SensorData data() { return SensorData(*this); }

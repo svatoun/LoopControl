@@ -115,6 +115,7 @@ boolean defineSensor(int id, boolean trigger) {
 	for (int i = 0; i < maxSensorCount; i++) {
 		Sensor& s = sensors[i];
 		if (s.sensorId == id) {
+			s.triggerSensor = trigger;
 			return true;
 		} else if (s.sensorId <= 0) {
 			s = Sensor(id);
@@ -178,8 +179,13 @@ void s88InLoop() {
 		Sensor& s = sensors[i];
 		if (s.changeProcessing) {
 			s.triggerChange = false;
+			if (s.suspended) {
+				continue;
+			}
+			s.changeProcessing = false;
 			if (debugS88) {
-				Serial.print(F("Sensor ")); Serial.print(s.sensorId); Serial.print(F(" changed to: ")); Serial.print(s.reportState);
+				Serial.print(F("Sensor ")); Serial.print(s.sensorId); Serial.print(" trigger:"); Serial.print(s.triggerSensor);
+				Serial.print(F(" changed to: ")); Serial.print(s.reportState);
 				Serial.print(F(" Reported after "));
 				unsigned long l = lastS88Millis & 0xffff;
 				if (l < s.stableFrom) {
@@ -192,10 +198,12 @@ void s88InLoop() {
 			}
 		}
 	}
+	/*
 	for (int i = 0; i < sensorCount; i++) {
 		Sensor& s = sensors[i];
 		s.changeProcessing = false;
 	}
+	*/
 }
 
 // ==================== Routines run in the interrupt ======================
@@ -221,7 +229,7 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 		}
 		if (s.overriden && skipOverride) {
 			s.s88State = state;
-			return;
+			continue;
 		}
 		long l;
 
@@ -235,7 +243,7 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 			l = 0;
 		}
 		if (state == s.reportState) {
-			if (debugS88Low) {
+			if (debugS88Debounce) {
 				if (s.changing) {
 					Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" reset after ")); Serial.println(l);
 				}
@@ -250,15 +258,18 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 				return;
 			}
 			if (l >= deb) {
-				if (debugS88Low) {
-					Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" TRIGGER to ")); Serial.println(state);
+				if (debugS88Debounce) {
+					Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" TRIGGER to ")); Serial.print(state);
+					Serial.print(F(" after ")); Serial.println(l);
 				}
 				s.changing = false;
 				s.triggerChange = true;
 				s.reportState = state;
+			} else if (debugS88Debounce && s.changing) {
+				Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F( "steady: ")); Serial.println(l);
 			}
 		} else if (millisQuantum > deb) {
-			if (debugS88Low) {
+			if (debugS88Debounce) {
 				Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" TRIGGER to ")); Serial.println(state);
 			}
 			s.s88State = state;
@@ -270,7 +281,7 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 			s.s88State = state;
 			s.changing = true;
 			s.stableFrom = lastS88Millis & 0xffff;
-			if (debugS88Low) {
+			if (debugS88Debounce) {
 				Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" changing to "));
 				Serial.print(state); Serial.print(F(" at millis ")); Serial.println(s.stableFrom);
 			}
@@ -334,7 +345,11 @@ int tryReadS88(int sensor) {
 	for (int i = 0; i < sensorCount; i++) {
 		Sensor& s = sensors[i];
 		if (s.sensorId == sensor) {
-			return s.reportState ? 1 : 0;
+			if (s.suspended) {
+				return s.suspendedState ? 1 : 0;
+			} else {
+				return s.reportState ? 1 : 0;
+			}
 		}
 	}
 	return -1;
@@ -344,6 +359,28 @@ boolean readS88(int sensor) {
 	int r = tryReadS88(sensor);
 	return r > 0;
 }
+
+void suspendS88(int sensorId) {
+	for (int i = 0; i < maxSensorCount; i++) {
+		Sensor& s = sensors[i];
+		if (s.sensorId == sensorId) {
+			s.suspendedState = s.reportState;
+			s.suspended = true;
+			break;
+		}
+	}
+}
+
+void resumeS88(int sensorId) {
+	for (int i = 0; i < maxSensorCount; i++) {
+		Sensor& s = sensors[i];
+		if (s.sensorId == sensorId) {
+			s.suspended = false;
+			break;
+		}
+	}
+}
+
 
 void overrideS88(int sensorId, boolean override, boolean state) {
 	for (int i = 0; i < maxSensorCount; i++) {
