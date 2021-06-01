@@ -17,7 +17,6 @@ boolean s88BusChanged = false;
 
 // Shamelessly copied from https://sites.google.com/site/sidloweb/elektrika/s88-ir-detektor
 // Copyright (c) Sidlo
-int sensorDebounceMillis = 200;
 byte data = 0 ;                   	// data byte
 int bitCounter = 0 ;              	// bit counter
 short byteIndex = 0;
@@ -39,6 +38,50 @@ long lastS88Millis = 0;
 int sensorCount = 0;
 
 sensorChangeFunc sensorCallback = NULL;
+
+Sensor::Sensor(const SensorData& d) :
+	reportState(false), s88State(false), triggerChange(false), changing(false), changeProcessing(false), overriden(false) {
+	sensorId = d.sensorId;
+	sensorDownDebounce = d.sensorDownDebounce;
+	sensorUpDebounce = d.sensorUpDebounce;
+	triggerSensor = d.triggerSensor;
+}
+
+SensorData::SensorData(const Sensor& s) {
+	sensorId = s.sensorId;
+	sensorDownDebounce = s.sensorDownDebounce;
+	sensorUpDebounce = s.sensorUpDebounce;
+	triggerSensor = s.triggerSensor;
+}
+
+int Sensor::upDebounceTime() const {
+	if (sensorUpDebounce == 0) {
+		return triggerSensor ? defaultTiming.triggerUpDebounce : defaultTiming.trackUpDebounce;
+	} else {
+		return sensorUpDebounce;
+	}
+}
+
+int Sensor::downDebounceTime() const {
+	if (sensorDownDebounce == 0) {
+		return triggerSensor ? defaultTiming.triggerDownDebounce : defaultTiming.trackDownDebounce;
+	} else {
+		return sensorUpDebounce;
+	}
+}
+
+void Sensor::dumpTimeouts() const {
+	if ((sensorUpDebounce == 0) && (sensorDownDebounce == 0)) {
+		return;
+	}
+	Serial.print(F("STM:")); Serial.print(sensorId);
+	if (sensorDownDebounce > 0) {
+		Serial.print(F(":D=")); Serial.print(sensorDownDebounce);
+	}
+	if (sensorDownDebounce > 0) {
+		Serial.print(F(":U=")); Serial.print(sensorUpDebounce);
+	}
+}
 
 void Sensor::printAll(boolean includeNone) {
 	for (int i = 0; i < maxSensorCount; i++) {
@@ -65,7 +108,7 @@ void Sensor::print() const {
 	Serial.println();
 }
 
-boolean defineSensor(int id) {
+boolean defineSensor(int id, boolean trigger) {
 	if (sensorCount >= maxSensorCount) {
 		return false;
 	}
@@ -75,6 +118,7 @@ boolean defineSensor(int id) {
 			return true;
 		} else if (s.sensorId <= 0) {
 			s = Sensor(id);
+			s.triggerSensor = trigger;
 			sensorCount++;
 			return true;
 		}
@@ -82,12 +126,16 @@ boolean defineSensor(int id) {
 	return false;
 }
 
+boolean defineSensor(int id) {
+	return defineSensor(id, false);
+}
+
 int forSensors(sensorIteratorFunc fn) {
 	int cnt = 0;
 	for (int i = 0; i < maxSensorCount; i++) {
 		Sensor& s = sensors[i];
 		if (s.sensorId > 0) {
-			cnt += fn(s.sensorId);
+			cnt += fn(s.sensorId, s.triggerSensor);
 		}
 	}
 	return cnt;
@@ -131,7 +179,13 @@ void s88InLoop() {
 		if (s.changeProcessing) {
 			s.triggerChange = false;
 			if (debugS88) {
-				Serial.print(F("Sensor ")); Serial.print(s.sensorId); Serial.print(F(" changed to: ")); Serial.println(s.reportState);
+				Serial.print(F("Sensor ")); Serial.print(s.sensorId); Serial.print(F(" changed to: ")); Serial.print(s.reportState);
+				Serial.print(F(" Reported after "));
+				unsigned long l = lastS88Millis & 0xffff;
+				if (l < s.stableFrom) {
+					l += 0x10000;
+				}
+				Serial.println(l - s.stableFrom);
 			}
 			if (sensorCallback) {
 				sensorCallback(s.sensorId, s.s88State);
@@ -145,6 +199,8 @@ void s88InLoop() {
 }
 
 // ==================== Routines run in the interrupt ======================
+long millisQuantum = 50;
+
 void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 	byte stateIdx = (sensorId - 1) / 8;
 	byte stateMask = 1 << ((sensorId -1) % 8);
@@ -167,11 +223,17 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 			s.s88State = state;
 			return;
 		}
-		long l = lastS88Millis & 0xffff;
-		if (l < s.stableFrom) {
-			l += 0x10000;
+		long l;
+
+		if (s.changing) {
+			l = lastS88Millis & 0xffff;
+			if (l < s.stableFrom) {
+				l += 0x10000;
+			}
+			l = l - s.stableFrom;
+		} else {
+			l = 0;
 		}
-		l = l - s.stableFrom;
 		if (state == s.reportState) {
 			if (debugS88Low) {
 				if (s.changing) {
@@ -182,19 +244,28 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 			s.changing = false;
 			return;
 		}
+		int deb = state ? s.upDebounceTime() : s.downDebounceTime();
 		if (state == s.s88State) {
 			if (!s.changing) {
 				return;
 			}
-			if (l >= sensorDebounceMillis) {
+			if (l >= deb) {
 				if (debugS88Low) {
 					Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" TRIGGER to ")); Serial.println(state);
 				}
 				s.changing = false;
 				s.triggerChange = true;
 				s.reportState = state;
-				s.stableFrom = 0;
 			}
+		} else if (millisQuantum > deb) {
+			if (debugS88Low) {
+				Serial.print(F("Sensor ")); Serial.print(sensorId); Serial.print(F(" TRIGGER to ")); Serial.println(state);
+			}
+			s.s88State = state;
+			s.changing = false;
+			s.triggerChange = true;
+			s.reportState = state;
+			s.stableFrom = lastS88Millis & 0xffff;
 		} else {
 			s.s88State = state;
 			s.changing = true;
@@ -207,12 +278,27 @@ void storeS88Bit(int sensorId, int state, boolean skipOverride) {
 	}
 }
 
+long prevS88 = 0;
+long cummulativeS88 = 0;
+long s88IntCount = 0;
+
+
 /***************************************************************************
  * Interrupt 0 LOAD.
  */
 void s88LoadInt() {
   bitCounter = 0 ;
   lastS88Millis = millis();
+  if (prevS88 > 0) {
+	  s88IntCount++;
+	  if ((s88IntCount % 100) == 0) {
+		  millisQuantum = cummulativeS88 / s88IntCount;
+		  cummulativeS88 = 0;
+		  s88IntCount = 1;
+	  }
+	  cummulativeS88 += (lastS88Millis - prevS88);
+  }
+  prevS88 = lastS88Millis;
   byteIndex = 0;
 }
 
@@ -310,6 +396,9 @@ boolean loadEEPROMSensors() {
 		Sensor& s = sensors[i];
 		s = Sensor();
 		s.sensorId = eepromReadByte(addr, checksum, allzero);
+		s.triggerSensor = eepromReadByte(addr, checksum, allzero);
+		s.sensorUpDebounce = eepromReadInt(addr, checksum, allzero);
+		s.sensorDownDebounce = eepromReadInt(addr, checksum, allzero);
 		if (s.sensorId > 0) {
 			sensorCount++;
 		}
@@ -324,11 +413,16 @@ boolean loadEEPROMSensors() {
 }
 
 void saveEEPROMSensors() {
+	Serial.println(F("Saving sensors"));
 	int addr = eepromSensors;
 	int checksum = 0;
 	for (int i = 0; i < maxSensorCount; i++) {
 		const Sensor& s = sensors[i];
+
 		eepromWriteByte(addr++, s.sensorId, checksum);
+		eepromWriteByte(addr++, s.triggerSensor, checksum);
+		addr = eepromWriteInt(addr, s.sensorUpDebounce, checksum);
+		addr = eepromWriteInt(addr, s.sensorDownDebounce, checksum);
 	}
 	int tmp = 0;
 	eepromWriteInt(addr, checksum, tmp);

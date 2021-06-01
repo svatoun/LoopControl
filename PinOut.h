@@ -48,6 +48,8 @@ const int RELAY_2		  = 11;
 const int RELAY_3		  = 9;
 const int RELAY_4		  = 10;
 
+// 2345   9 10 11 12  	6 7 8 A0  vstupy: A1 A2 A3 A4
+
 const boolean relayOnHigh = false;
 
 

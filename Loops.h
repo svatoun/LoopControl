@@ -13,7 +13,7 @@
 const int maxLoopCount = 8;
 const int maxRelayCount = 4;
 
-typedef int (*sensorIteratorFunc)(int sensorId);
+typedef int (*sensorIteratorFunc)(int sensorId, boolean triggerType);
 extern int freeUnusedSensors();
 extern int relayPins[maxRelayCount];
 
@@ -318,12 +318,18 @@ struct LoopState {
 
 	Status status : 4;
 	Direction direction : 1;
+
+	byte occupiedLeft;
+	byte occupiedRight;
+	byte occupiedCore;
+
 	long timeout;
 	long outageStart;
 	long leftSensorTime;
 	long rightSensorTime;
 
-	LoopState() : status(Status::idle), direction(left), timeout(0), outageStart(0), leftSensorTime(0), rightSensorTime(0) {}
+	LoopState() : status(Status::idle), direction(left), timeout(0), outageStart(0), leftSensorTime(0), rightSensorTime(0),
+			occupiedLeft(0), occupiedRight(0), occupiedCore(0) {}
 
 	boolean outage() const { return outageStart > 0; };
 
@@ -334,7 +340,10 @@ struct LoopState {
 	void printState() const;
 	void monitorPrint() const;
 
+	void switchRelayTo(const Endpoint& toEndpoint);
+
 	void processIdle(int sensor);
+	void processOccupied(int sensor, boolean s);
 	void processApproach(int sensor, const Endpoint& ep);
 	void processReadyEnter(int sensor, const Endpoint& ep);
 	void processEntering(int sensor, const Endpoint& from);
@@ -343,9 +352,14 @@ struct LoopState {
 	void processExiting(int sensor, const Endpoint& to);
 	void processExited(int sensor, const Endpoint& to);
 
+	boolean maybeCoreAbandoned(int sensor);
 	void maybeReadyEnter(const Endpoint& via);
 	void maybeArm(const Endpoint& via);
 	void maybeApproach(Status prevStatus, const Endpoint& from);
+	void maybeFreeRelay(const Endpoint& via);
+
+	void handleOutage();
+	void setRelay() const;
 };
 
 boolean defineLoop(int id, const LoopDef& def);

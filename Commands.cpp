@@ -6,12 +6,14 @@
 #include "S88.h"
 #include "Terminal.h"
 
+SensorTiming defaultTiming;
+
 int editedLoopId = -1;
 LoopDef	editedLoop;
 
 char defPrompt[8];
 
-int countSensors(int s) {
+int countSensors(int s, boolean type) {
 	return 1;
 }
 
@@ -141,11 +143,11 @@ void commandEndpoint() {
 			ptr->invertInSensor = invert;
 			break;
 		case 'o':
-			ptr->sensorIn = sno;
+			ptr->sensorOut = sno;
 			ptr->invertOutSensor = invert;
 			break;
 		case 's': case 'S':
-			ptr->sensorIn = sno;
+			ptr->sensorOut = sno;
 			ptr->invertInSensor = invert;
 			ptr->sensorIn = sno;
 			ptr->invertOutSensor = invert;
@@ -335,6 +337,13 @@ void commandDump() {
 		d.dump();
 		Serial.println(F("FIN"));
 	}
+	for (int i = 0; i < maxSensorCount; i++) {
+		const Sensor& s = sensors[i];
+		if (s.sensorId == 0) {
+			continue;
+		}
+		s.dumpTimeouts();
+	}
 }
 
 void commandDelete() {
@@ -381,6 +390,56 @@ void monitorPrint() {
 	Serial.print((char)0x0d);
 }
 
+void commandSensorTimeouts() {
+	int num = nextNumber();
+	if (num <= 0) {
+		Serial.print(F("Invalid sensor number"));
+		return;
+	}
+	int id = -1;
+	for (int i = 0; i < maxSensorCount; i++) {
+		Sensor& s = sensors[i];
+		if (s.sensorId == num) {
+			id = i;
+			break;
+		}
+	}
+	if (id == -1) {
+		Serial.println(F("Sensor unknown."));
+		return;
+	}
+	Sensor &target = sensors[id];
+
+	if (*inputPos == 0) {
+		Serial.println(F("Resetting to defaults."));
+		target.sensorUpDebounce = target.sensorDownDebounce = 0;
+		return;
+	}
+	while (*inputPos != 0) {
+		char c = *(inputPos++);
+		if (*inputPos != '=') {
+			Serial.println(F("Syntax error."));
+			return;
+		}
+		int t = nextNumber();
+		if (t <= 0) {
+			Serial.println(F("Invalid timeout."));
+			return;
+		}
+		switch (c) {
+			case 'U': case 'u':
+				target.sensorUpDebounce = t;
+				break;
+			case 'D': case 'd':
+				target.sensorDownDebounce = t;
+				break;
+			default:
+				Serial.println(F("Syntax error."));
+				return;
+		}
+	}
+}
+
 
 void initCommands() {
   registerLineCommand("DEF", &commandLoop);
@@ -391,6 +450,7 @@ void initCommands() {
   registerLineCommand("FIN", &commandFinish);
   registerLineCommand("DEL", &commandDelete);
   registerLineCommand("DMP", &commandDump);
+  registerLineCommand("STM", &commandSensorTimeouts);
 }
 
 boolean commandHandler(ModuleCmd cmd) {

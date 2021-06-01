@@ -12,6 +12,8 @@
 #include "S88.h"
 #include "Utils.h"
 
+extern boolean logTransitions;
+
 LoopDef	loopDefinitions[maxLoopCount];
 LoopState loopStates[maxLoopCount];
 int relayPins[maxRelayCount] = {
@@ -62,7 +64,7 @@ String statName(Status s, Direction d) {
 }
 
 
-int freeUnusedSingleSensor(int sensor) {
+int freeUnusedSingleSensor(int sensor, boolean type) {
 	for (int i = 0; i < maxLoopCount; i++) {
 		const LoopDef& def = loopDefinitions[i];
 		if (!def.active) {
@@ -215,26 +217,26 @@ void LoopCore::monitorPrint() const {
 }
 
 void LoopCore::dump() const {
-	if (trackA == 0) {
+	if ((trackA == 0) && (trackB == 0)) {
 		return;
 	}
-	Serial.print(F("COR:"));
+	Serial.print(F("COR"));
 	dumpSensor('A', trackA, invertA);
 	dumpSensor('B', trackB, invertB);
 	Serial.println();
 }
 
-void callSensorFunc(int sensor, int& cnt, sensorIteratorFunc fn) {
+void callSensorFunc(int sensor, int& cnt, sensorIteratorFunc fn, boolean type) {
 	if (sensor <= 0) {
 		return;
 	}
-	cnt += fn(sensor);
+	cnt += fn(sensor, type);
 }
 
 int LoopCore::forSensors(sensorIteratorFunc fn) const {
 	int cnt = 0;
-	callSensorFunc(trackB, cnt, fn);
-	callSensorFunc(trackA, cnt, fn);
+	callSensorFunc(trackB, cnt, fn, false);
+	callSensorFunc(trackA, cnt, fn, false);
 	return cnt;
 }
 
@@ -316,13 +318,13 @@ void LoopDef::dump() const {
 
 int Endpoint::forSensors(sensorIteratorFunc fn) const {
 	int cnt = 0;
-	callSensorFunc(sensorA, cnt, fn);
-	callSensorFunc(sensorB, cnt, fn);
-	callSensorFunc(sensorIn, cnt, fn);
-	callSensorFunc(sensorOut, cnt, fn);
-	callSensorFunc(shortTrack, cnt, fn);
-	callSensorFunc(turnout, cnt, fn);
-	callSensorFunc(switchOrSensor, cnt, fn);
+	callSensorFunc(sensorA, cnt, fn, true);
+	callSensorFunc(sensorB, cnt, fn, true);
+	callSensorFunc(sensorIn, cnt, fn, true);
+	callSensorFunc(sensorOut, cnt, fn, true);
+	callSensorFunc(shortTrack, cnt, fn, false);
+	callSensorFunc(turnout, cnt, fn, false);
+	callSensorFunc(switchOrSensor, cnt, fn, !useSwitch);
 	return cnt;
 }
 
@@ -355,6 +357,7 @@ boolean Endpoint::isPrimedEnter() const{
 		boolean ss = readS88(switchOrSensor) != invertSensor;
 		return ss;
 	}
+	// XXX check
 	return true;
 }
 
@@ -363,7 +366,7 @@ boolean Endpoint::hasTriggerSensors() const {
 }
 
 boolean Endpoint::sensorsActive() const {
-	if (sensorIn == 0 || sensorOut == 0) {
+	if (sensorIn == 0 && sensorOut == 0) {
 		return false;
 	}
 	if (selectedExitTrack() == -1) {
@@ -371,10 +374,10 @@ boolean Endpoint::sensorsActive() const {
 	}
 	boolean active = false;
 	if (sensorIn > 0) {
-		active = readS88(sensorIn);
+		active = readS88(sensorIn) != invertInSensor;
 	}
 	if ((sensorOut > 0) && (sensorIn != sensorOut)) {
-		active |= readS88(sensorOut);
+		active |= readS88(sensorOut) != invertInSensor;
 	}
 	return active;
 }
@@ -585,8 +588,6 @@ boolean Endpoint::isValidExit() const {
 			}
 			return false;
 		}
-	} else {
-		return false;
 	}
 	if (debugLoops) {
 		Serial.println(F("Valid for exit"));
@@ -611,11 +612,13 @@ boolean Endpoint::isPrimedExit() const {
 			Serial.print(F("Exit sensor: ")); Serial.println(v);
 		}
 		return v;
-	} else {
+	} else if ((sensorA != 0) || (sensorB != 0)) {
 		if (debugLoops) {
 			Serial.println(F("Primed for exit"));
 		}
 		return true;
+	} else {
+		return false;
 	}
 }
 
@@ -641,8 +644,8 @@ int LoopDef::forSensors(sensorIteratorFunc fn) const {
 			left.forSensors(fn) + right.forSensors(fn) + core.forSensors(fn);
 }
 
-int defineLoopSensor(int id) {
-	return defineSensor(id) ? 0 : 1;
+int defineLoopSensor(int id, boolean trigger) {
+	return defineSensor(id, trigger) ? 0 : 1;
 }
 
 void LoopDef::defineSensors() const {
@@ -673,7 +676,7 @@ void switchRelay(int rid, boolean on) {
 	if (rid <= 0 || rid > maxRelayCount) {
 		return;
 	}
-	if (debugRelays) {
+	if (logTransitions) {
 		Serial.print(F("Setting relay ")); Serial.print(rid); Serial.print(F(" => ")); Serial.println(on);
 	}
 	digitalWrite(relayPins[rid - 1], (on == relayOnHigh) ? HIGH : LOW);
@@ -712,6 +715,13 @@ void LoopState::markDirSensor(boolean out) {
 		if (debugLoops) {
 			Serial.print(F("* Mark right sensor: ")); Serial.println(rightSensorTime);
 		}
+	}
+}
+
+void LoopState::setRelay() const {
+	const LoopDef& d = def();
+	if (!d.active) {
+		return;
 	}
 }
 
@@ -802,7 +812,7 @@ void processSensorTriggers(int sensor, boolean state) {
 }
 
 void resetLoops() {
-	Serial.println("Clearing all loops");
+	Serial.println(F("Clearing all loops"));
 	for (int i = 0; i < maxLoopCount; i++) {
 		loopDefinitions[i] = LoopDef();
 		loopStates[i] = LoopState();
@@ -811,6 +821,7 @@ void resetLoops() {
 }
 
 void eepromSaveLoops() {
+	Serial.println(F("Saving loops"));
 	eeBlockWrite(0xca, eepromLoopDefs, &loopDefinitions[0], sizeof(loopDefinitions));
 }
 
@@ -841,6 +852,9 @@ boolean periodicTriggers() {
 	for (int i = 0; i < maxLoopCount; i++) {
 		LoopState &st = loopStates[i];
 		LoopDef &def = loopDefinitions[i];
+		if (!def.active) {
+			continue;
+		}
 		if (st.rightSensorTime > 0 && def.right.hasTriggerSensors()) {
 			long d = m - st.rightSensorTime;
 			if (debugLoops) {
@@ -877,14 +891,25 @@ boolean periodicTriggers() {
 				st.leftSensorTime = 0;
 			}
 		}
+		if (st.outage() && (def.occupiedTrackSensors() == 0)) {
+			st.handleOutage();
+		}
 	}
 	return true;
+}
+
+void initLoopOutputs() {
+	pinMode(RELAY_1, OUTPUT);
+	pinMode(RELAY_2, OUTPUT);
+	pinMode(RELAY_3, OUTPUT);
+	pinMode(RELAY_4, OUTPUT);
 }
 
 boolean loopsHandler(ModuleCmd cmd) {
 	switch (cmd) {
 	case initialize:
 		sensorCallback = &processSensorTriggers;
+		initLoopOutputs();
 		break;
 	case eepromLoad:
 		return eepromLoadLoops();

@@ -33,9 +33,8 @@ const int reportS88Loss = 1;          // will flash LED if S88 CLK signal is not
 
 const int eepromVersion = 0x00;
 const int eepromSensors = 0x02;
-const int eepromStates = 0x30;
-const int eepromLoopDefs = 0x50;
-const int eepromChecksum = 0x100;
+const int eepromLoopDefs = 0xC0;
+const int eepromChecksum = 0x1F0;
 
 
 extern void (* charModeCallback)(char);

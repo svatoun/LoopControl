@@ -82,6 +82,9 @@ int eepromReadByte(int &addr, int& checksum, boolean& allzero) {
     int v = EEPROM.read(addr);
     addr ++;
     checksum = checksum ^ v;
+    if (v != 0) {
+    	allzero = false;
+    }
     return v;
 }
 

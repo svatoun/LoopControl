@@ -10,7 +10,8 @@
 #include "Loops.h"
 #include "S88.h"
 
-long outageTimeout = 5 * 60 * 1000; // 5 minutes
+long outageTimeout = 5 * 60 * 1000l; // 5 minutes in the core
+long outageAproachExitTimeout = 10 * 1000; // 10 seconds at the edges
 
 boolean logTransitions = true;
 
@@ -75,9 +76,21 @@ void LoopState::maybeArm(const Endpoint& via) {
 			return;
 		}
 	}
+	if (via.sensorOut > 0) {
+		if (!via.sensorsActive()) {
+			if (debugTransitions) {
+				Serial.println(F("Exit out sensor NOT active"));
+			}
+			return;
+		}
+	}
 	if (d.core.isDirectionPrimed(direction == left)) {
 		switchStatus(armed, via);
 	}
+}
+
+void LoopState::processReadyEnter(int sensor, const Endpoint& ep) {
+	processApproach(sensor, ep);
 }
 
 void LoopState::processApproach(int sensor, const Endpoint& ep) {
@@ -98,16 +111,27 @@ void LoopState::processApproach(int sensor, const Endpoint& ep) {
 	}
 	if (d.core.hasSensor(sensor)) {
 		if (debugTransitions) {
-			Serial.println("Core sensor changed");
-			Serial.println(direction == left ? " -> Left" : "-> Right");
-			Serial.println(&ep == &d.left ? "Left" : "Right");
+			Serial.println(F("Core sensor changed"));
+			Serial.println(direction == left ? F(" -> Left") : F("-> Right"));
+			Serial.println(&ep == &d.left ? F("Left") : F("Right"));
 		}
-		if (ep.occupied() && d.core.isPrimed()) {
-			if (debugTransitions) {
-				Serial.println(F("Core section partially entered"));
+		if (d.core.isPrimed()) {
+			if (ep.occupied()) {
+				if (debugTransitions) {
+					Serial.println(F("Core section partially entered"));
+				}
+				switchStatus(entering, ep);
+				return;
+			} else {
+				if (debugTransitions) {
+					Serial.println(F("Jumped into core"));
+				}
+				switchStatus(moving, ep);
+				return;
 			}
-			switchStatus(entering, ep);
 		}
+	} else if (status == approach) {
+		maybeReadyEnter(ep);
 	}
 }
 
@@ -119,20 +143,56 @@ void LoopState::maybeApproach(Status prevStatus, const Endpoint& from) {
 	switchStatus(approach, from);
 }
 
+void LoopState::maybeReadyEnter(const Endpoint& from) {
+	boolean transition = false;
+
+	if (from.isPrimedEnter()) {
+		switchStatus(readyEnter, from);
+	}
+}
+
+void LoopState::maybeFreeRelay(const Endpoint& via) {
+	if (via.sensorIn > 0) {
+		const Endpoint &opp = def().opposite(via);
+		if ((opp.sensorIn == 0) && (opp.relay > 0)) {
+			if (logTransitions) {
+				Serial.print(F("Opposite has no sensor, conservative switch to opposite"));
+			}
+			switchRelayTo(opp);
+		}
+	}
+}
+
 void LoopState::switchStatus(Status s, const Endpoint& ep) {
 	Status oldStatus = status;
 	Direction oldDirection = direction;
 
 	status = s;
 	if (logTransitions) {
-		Serial.print('#'); Serial.print(id());
-		Serial.print(F(": Change status: ")); Serial.print(statName(status)); Serial.print(F(" => ")); Serial.print(statName(s));
+		Serial.print('#'); Serial.print(id() + 1);
+		Serial.print(F(": Change status: ")); Serial.print(statName(oldStatus)); Serial.print(F(" => ")); Serial.print(statName(s));
 		Serial.print(F(", Direction: ")); Serial.println(direction ? F("left") : F("right"));
 	}
 	const LoopDef& d = def();
 
 	switch (s) {
+		default:
+			Serial.print(F("*Unhandled state: ")); Serial.print(s); Serial.print('-'); Serial.println(statName(s));
+			break;
+
+		case exited:
+			maybeFreeRelay(ep);
+			break;
+
 		case approach:
+			/*
+			switchRelay(fromEdge().relay, fromEdge().relayTriggerState);
+			markDirSensor(false);
+			*/
+			maybeReadyEnter(fromEdge());
+			break;
+
+		case readyEnter:
 			switchRelay(fromEdge().relay, fromEdge().relayTriggerState);
 			markDirSensor(false);
 			break;
@@ -164,6 +224,7 @@ void LoopState::switchStatus(Status s, const Endpoint& ep) {
 		if (logTransitions) {
 			Serial.println(F("Clearing trigger sensors"));
 		}
+		outageStart = 0;
 		leftSensorTime = rightSensorTime = 0;
 	}
 }
@@ -202,14 +263,14 @@ void LoopState::processIdle(int sensor) {
 		if (leftWasPrimed) {
 			direction = left;
 			if (debugTransitions) {
-				Serial.print("Cold boot: core + left");
+				Serial.print(F("Cold boot: core + left"));
 			}
 			switchStatus(armed, d.left);
 			switchStatus(exiting, d.left);
 		} else if (rightWasPrimed) {
 			direction = right;
 			if (debugTransitions) {
-				Serial.print("Cold boot: core + right");
+				Serial.print(F("Cold boot: core + right"));
 			}
 			switchStatus(armed, d.right);
 			switchStatus(exiting, d.right);
@@ -218,13 +279,13 @@ void LoopState::processIdle(int sensor) {
 	}
 
 	if (debugTransitions) {
-		Serial.println("Checking left");
+		Serial.println(F("Checking left"));
 	}
-	boolean leftReady = d.left.hasSensor(sensor) && d.left.isPrimedEnter();
+	boolean leftReady = d.left.hasSensor(sensor) && d.left.isValidEnter();
 	if (debugTransitions) {
-		Serial.println("Checking right");
+		Serial.println(F("Checking right"));
 	}
-	boolean rightReady = d.right.hasSensor(sensor) && d.right.isPrimedEnter();
+	boolean rightReady = d.right.hasSensor(sensor) && d.right.isValidEnter();
 
 	if (debugTransitions) {
 		Serial.print(F("Left:  ")); d.left.printState();
@@ -232,11 +293,20 @@ void LoopState::processIdle(int sensor) {
 	}
 
 	if (leftReady && rightReady) {
-		// no op
-		if (debugTransitions) {
-			Serial.println(F("Both active => idle"));
+		// try to determine if one of the 'ready' endpoints is already primed:
+		boolean leftPrimed = d.left.isPrimedEnter();
+		boolean rightPrimed = d.right.isPrimedEnter();
+		if (leftPrimed && !rightPrimed) {
+			rightReady = false;
+		} else if (rightPrimed && !leftPrimed) {
+			leftReady = false;
+		} else {
+			// no op
+			if (debugTransitions) {
+				Serial.println(F("Both active => idle"));
+			}
+			return;
 		}
-		return;
 	}
 	if (leftReady) {
 		direction = right;
@@ -303,45 +373,30 @@ void LoopState::processEntering(int sensor, const Endpoint& from) {
 void LoopState::processMoving(int sensor, const Endpoint& from) {
 	const LoopDef& d = def();
 	const Endpoint& opp = d.opposite(from);
-	if (d.core.hasSensor(sensor) && !d.core.isPrimed()) {
-		if (from.hasChanged() && from.occupied()) {
-			if (debugTransitions) {
-				Serial.println(F("Guess: jumped back"));
-			}
-			direction = reversed();
-			switchStatus(exited, from);
-			return;
-		}
-		if (opp.hasChanged() && opp.occupied()) {
-			if (debugTransitions) {
-				Serial.println(F("Guess: jumped forward"));
-			}
-			switchStatus(exited, from);
-			return;
-		}
-		if (debugTransitions) {
-			Serial.println(F("Disappeared ! Running timeout."));
-		}
-		timeout = millis();
+
+	if (maybeCoreAbandoned(sensor)) {
 		return;
 	}
-	if ((opp.hasSensor(sensor) || from.hasTrigger(sensor)) && opp.isPrimedExit()) {
-		if (debugTransitions) {
-			Serial.println(F("Can exit loop"));
-		}
-		if (from.hasTriggerSensors() && !opp.hasTriggerSensors()) {
+
+	if ((opp.hasSensor(sensor) || from.hasTrigger(sensor))) {
+		if (opp.isPrimedExit()) {
 			if (debugTransitions) {
-				Serial.println(F("Checking past sensors"));
+				Serial.println(F("Can exit loop"));
 			}
-			if (!dirSensorTimeout(false)) {
+			if (from.hasTriggerSensors() && !opp.hasTriggerSensors()) {
 				if (debugTransitions) {
-					Serial.println(F("* Still In Timeout"));
+					Serial.println(F("Checking past sensors"));
 				}
-				return;
+				if (!dirSensorTimeout(false)) {
+					if (debugTransitions) {
+						Serial.println(F("* Still In Timeout"));
+					}
+					return;
+				}
 			}
+			switchStatus(armed, opp);
+			return;
 		}
-		switchStatus(armed, opp);
-		return;
 	}
 	if (from.hasSensor(sensor)) {
 		if (from.isPrimedExit()) {
@@ -359,19 +414,69 @@ void LoopState::processMoving(int sensor, const Endpoint& from) {
 	}
 }
 
+boolean LoopState::maybeCoreAbandoned(int sensor) {
+	const LoopDef& d = def();
+	if (d.core.isPrimed()) {
+		return false;
+	}
+	if (d.left.occupied()) {
+		if (!d.right.occupied()) {
+			direction = left;
+			if (debugTransitions) {
+				Serial.println(F("Core abandoned going left"));
+			}
+			switchStatus(exited, d.left);
+			return true;
+		}
+	} else if (d.right.occupied()) {
+		direction = left;
+		if (debugTransitions) {
+			Serial.println(F("Core abandoned going right"));
+		}
+		switchStatus(exited, d.right);
+		return true;
+	}
+	if (debugTransitions) {
+		Serial.println(F("Disappeared ! Running timeout."));
+	}
+	timeout = millis();
+	return true;
+}
+
+void LoopState::switchRelayTo(const Endpoint& exitVia) {
+	if (exitVia.relay > 0) {
+		switchRelay(exitVia.relay, exitVia.relayTriggerState);
+		return;
+	}
+	const Endpoint& opp = def().opposite(exitVia);
+	if (opp.relay > 0) {
+		switchRelay(opp.relay, !opp.relayTriggerState);
+	}
+}
+
 void LoopState::processArmed(int sensor, const Endpoint& to) {
 	const LoopDef& d = def();
-	if (d.core.hasSensor(sensor) && !d.core.isPrimed()) {
+	const Endpoint& from = d.opposite(to);
 
-	}
-	if (!to.hasSensor(sensor)) {
+	if (maybeCoreAbandoned(sensor)) {
 		return;
+	}
+	boolean revert = false;
+	if (!to.hasSensor(sensor)) {
+		if (from.sensorOut == sensor) {
+			if (logTransitions) {
+				Serial.print(F("Train reversed while armed for ")); Serial.println(direction == left ? "left" : "right");
+			}
+			revert = true;
+		}
+		if (!revert) {
+			return;
+		}
 	}
 	if (to.changedOccupied(sensor, true)) {
 		switchStatus(exiting, to);
 		return;
 	}
-	boolean revert = false;
 	if (to.isValidExit()) {
 		if (to.hasTriggerSensors() && dirSensorTimeout(true)) {
 			if (debugTransitions) {
@@ -386,15 +491,24 @@ void LoopState::processArmed(int sensor, const Endpoint& to) {
 		}
 		revert = true;
 	}
+
 	if (revert) {
+		if (to.sensorOut > 0) {
+			// exit has safety sensor, no need to change direction
+			if (from.sensorOut == 0) {
+				// but the opposite has no sensor; flip the relay just in case.
+				switchRelayTo(from);
+				if (debugTransitions) {
+					Serial.println(F("Relay switched to opposite"));
+				}
+			}
+			switchStatus(moving, to);
+			return;
+		}
+
 		// still moving in the _SAME_ direction; exit became invalid for
 		// some reason. Heading to the exit, but just in case turn off the relay.
-		if (to.triggerState) {
-			switchRelay(d.left.relay, d.left.relayOffState);
-			switchRelay(d.right.relay, d.right.relayOffState);
-		}
-		switchStatus(moving, d.opposite(to));
-		return;
+		switchStatus(moving, to);
 	}
 }
 
@@ -439,6 +553,76 @@ void LoopState::processExited(int sensor, const Endpoint& via) {
 		switchStatus(idle, via);
 		return;
 	}
+	if (via.sensorIn == sensor) {
+		if (readS88(via.sensorIn) != via.invertInSensor) {
+			direction = directionFrom(via);
+			switchStatus(approach, via);
+			return;
+		}
+	}
+}
+
+void LoopState::processOccupied(int sensor, boolean s) {
+	const LoopDef& d = def();
+
+	if (d.left.hasSensor(sensor) && d.left.isPrimedExit()) {
+		direction = left;
+		if (d.left.occupiedTrackSensors() == 0) {
+			switchStatus(moving, /* from */ d.right);
+		} else {
+			switchStatus(exiting, d.left);
+		}
+		return;
+	}
+	if (d.right.hasSensor(sensor) && d.right.isPrimedExit()) {
+		direction = right;
+		if (d.right.occupiedTrackSensors() == 0) {
+			switchStatus(moving, /* from */ d.left);
+		} else {
+			switchStatus(exiting, d.right);
+		}
+		return;
+	}
+
+	if (d.occupiedTrackSensors() == 0) {
+		switchStatus(idle, d.left);
+		return;
+	}
+	if (d.core.occupied()) {
+		return;
+	}
+	if (d.left.hasSensor(sensor) && d.left.occupied()) {
+		direction = left;
+		switchStatus(exited, d.left);
+		return;
+	}
+	if (d.right.hasSensor(sensor) && d.right.occupied()) {
+		direction = right;
+		switchStatus(exited, d.right);
+		return;
+	}
+}
+
+void LoopState::handleOutage() {
+	if (!outage()) {
+		return;
+	}
+	long delta = millis() - outageStart;
+	long threshold;
+
+	if ((status == approach || status == exited)) {
+		threshold = outageAproachExitTimeout;
+	} else {
+		threshold = outageTimeout;
+	}
+
+	const LoopDef& d = def();
+	if (delta > threshold) {
+		Serial.print('#'); Serial.print(id() + 1);
+		Serial.print(F(" delta = ")); Serial.print(delta); Serial.print(F(", threshold = ")); Serial.print(threshold);
+		Serial.println(F(": Outage timeout => idle"));
+		switchStatus(idle, d.left);
+	}
 }
 
 void LoopState::processChange(int sensor, boolean s) {
@@ -449,28 +633,34 @@ void LoopState::processChange(int sensor, boolean s) {
 	}
 	boolean active = d.occupiedTrackSensors();
 	if (active) {
-		if (outage() && !d.core.occupied()) {
-			Serial.println(F("Outage recovery => idle"));
-			switchStatus(idle, d.left);
+		if (outage() && status != idle) {
+			if (!d.core.occupied()) {
+				const Endpoint& ep = toEdge();
+				if (ep.occupiedTrackSensors() == 0) {
+					Serial.println(F("Outage recovery => idle"));
+					switchStatus(idle, d.left);
+					return;
+				}
+			}
+			Serial.print(F("Outage ended => ")); Serial.print(statName(status)); Serial.println();
 		}
 	} else {
 		// remain silent, maybe track power outage...
 		switch (status) {
+		/*
 		case approach:
+		*/
 		case exited:
 		case idle:
 			break;
 		default:
 			if (outageStart == 0) {
+				Serial.print('#'); Serial.print(id() + 1);
+				Serial.println(F(": Outage start"));
 				outageStart = millis();
-				break;
+				return;
 			}
-			long delta = millis() - outageStart;
-			if (delta > outageTimeout) {
-				Serial.print('#'); Serial.print(id());
-				Serial.println(F(": Outage timeout => idle"));
-				switchStatus(idle, d.left);
-			}
+			handleOutage();
 			return;
 		}
 	}
@@ -482,6 +672,11 @@ void LoopState::processChange(int sensor, boolean s) {
 		case idle:
 			processIdle(sensor);
 			break;
+
+		case occupied:
+			processOccupied(sensor, s);
+			break;
+
 		case approach:
 			processApproach(sensor, fromEdge());
 			break;

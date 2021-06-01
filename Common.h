@@ -16,6 +16,7 @@ void registerLineCommand(const char* cmd, void (*aHandler)());
 enum ModuleCmd {
   initialize,
   eepromLoad,
+  beforeLoop,
   eepromSave,
   status,
   reset,

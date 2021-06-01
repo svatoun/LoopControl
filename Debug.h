@@ -11,7 +11,7 @@
 const int debug = 1;            // set to >0 to activate debug output on the serial console. The collector will use delays 200ms and will print stats each 2s
 const int debugSensors = 0;
 const int debugLow = 0;
-const int debugControl = 1;     // debug control commands
+const int debugControl = 0;     // debug control commands
 const int debugLed = 0;
 const int debugMgmt = 0;
 const int debugS88 = 1;
@@ -19,7 +19,7 @@ const int debugS88Low = 0;
 const int numChannels = 8;      // number of sensors used. Max 5 on Arduino UNO, 8 on Nano.
 
 const int debugLoops = 0;
-const int debugTransitions = 0;
+const int debugTransitions = 1;
 const int debugRelays = 1;
 
 #undef __test_s88
