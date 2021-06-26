@@ -40,11 +40,11 @@ boolean logTransitions = true;
  *  - sensor fires (if defined)
  *
  * The state automaton:
- *
- * idle -> approach -> entering -> moving ->  armed -> exiting -> exited   -> idle
- * 						  |          |          \----\   |           |          |
- * 						  v			 v                \  v           v          v
- * 						exited  -> exiting -> armed -> moving  -> entering -> approach -> idle
+ * Relay:	 OFF?		  ON					    		 ON                  OFF?       OFF
+ * idle -> approach => readyEnter -> entering -> moving =>  armed -> exiting -> exited   -> idle
+ * 									  |          |          \----\   |           |          |
+ * 									  v			 v                \  v           v          v
+ *			 						exited  <- exiting <- armed <- moving  <- entering <- approach <- idle
  *
  * And "Moving" and "Idle" are auto-transitional states:
  * - if exit conditions are met, Moving transitions to Armed
@@ -84,7 +84,7 @@ void LoopState::maybeArm(const Endpoint& via) {
 			return;
 		}
 	}
-	if (d.core.isDirectionPrimed(direction == left)) {
+	if (d.core.isDirectionPrimed(directionTo(via) == left)) {
 		switchStatus(armed, via);
 	}
 }
@@ -93,45 +93,45 @@ void LoopState::processReadyEnter(int sensor, const Endpoint& ep) {
 	processApproach(sensor, ep);
 }
 
-void LoopState::processApproach(int sensor, const Endpoint& ep) {
+void LoopState::processApproach(int sensor, const Endpoint& from) {
 	const LoopDef& d = def();
-	if (ep.hasSensor(sensor) && ep.changedOccupied(sensor, false)) {
+	if (from.hasSensor(sensor) && from.changedOccupied(sensor, false)) {
 		if (d.core.isPrimed()) {
 			if (debugTransitions) {
 				Serial.println(F("Core section jumped to"));
 			}
-			switchStatus(moving, ep);
+			switchStatus(moving, from);
 			return;
 		} else {
 			if (debugTransitions) {
 				Serial.println(F("Left & core is empty"));
 			}
-			switchStatus(idle, ep);
+			switchStatus(idle, from);
 		}
 	}
 	if (d.core.hasSensor(sensor)) {
 		if (debugTransitions) {
 			Serial.println(F("Core sensor changed"));
 			Serial.println(direction == left ? F(" -> Left") : F("-> Right"));
-			Serial.println(&ep == &d.left ? F("Left") : F("Right"));
+			Serial.println(&from == &d.left ? F("Left") : F("Right"));
 		}
 		if (d.core.isPrimed()) {
-			if (ep.occupied()) {
+			if (from.occupied()) {
 				if (debugTransitions) {
 					Serial.println(F("Core section partially entered"));
 				}
-				switchStatus(entering, ep);
+				switchStatus(entering, from);
 				return;
 			} else {
 				if (debugTransitions) {
 					Serial.println(F("Jumped into core"));
 				}
-				switchStatus(moving, ep);
+				switchStatus(moving, from);
 				return;
 			}
 		}
 	} else if (status == approach) {
-		maybeReadyEnter(ep);
+		maybeReadyEnter(from);
 	}
 }
 

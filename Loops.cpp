@@ -124,11 +124,11 @@ void printSensorAndState(const String& name, int sensor, boolean invert) {
 }
 
 boolean Endpoint::stateA() const {
-	return readS88(sensorA) != invertA;
+	return (sensorA > 0) && (readS88(sensorA) != invertA);
 }
 
 boolean Endpoint::stateB() const {
-	return readS88(sensorB) != invertB;
+	return (sensorB > 0) && (readS88(sensorB) != invertB);
 }
 
 void Endpoint::printState() const {
@@ -573,7 +573,7 @@ boolean Endpoint::changedOccupied(int sensor, boolean occupied) const {
 
 boolean Endpoint::isValidExit() const {
 	int exitTrack = selectedExitTrack();
-	if (exitTrack < 0) {
+	if (exitTrack <= 0) {
 		// defined, but switched to other direction
 		return false;
 	}

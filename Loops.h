@@ -90,12 +90,18 @@ struct Endpoint {
 
 	/**
 	 * Checks if the endpoint is 'primed' for exit. The adjacent track must not be occupied, the turnout must
-	 * be in correct position and trigger sensor must signal.
+	 * be in correct position and out trigger sensor, if present, must signal
 	 */
 	boolean isPrimedExit() const;
 
+	/**
+	 * Loop can be entered from this endpoint. Track is occupied, turnout in correct position.
+	 */
 	boolean isValidEnter() const;
 
+	/**
+	 * Loop can be left: the adjacent track must not be occupied, turnout in the correct position.
+	 */
 	boolean isValidExit() const;
 
 	/*
@@ -112,8 +118,14 @@ struct Endpoint {
 
 	boolean changedOccupied(int sensor, boolean occupied) const;
 
+	/**
+	 * Some part of track is occupied.
+	 */
 	boolean occupied() const;
 
+	/**
+	 * Exit / entry track selected by turnout, or 0, if turnout in wrong position.
+	 */
 	int selectedExitTrack() const;
 
 	boolean hasChanged() const;
@@ -122,8 +134,14 @@ struct Endpoint {
 
 	boolean stateB() const;
 
+	/**
+	 * One of the sensors is active
+	 */
 	boolean sensorsActive() const;
 
+	/**
+	 * Has sensor to trigger boundary crossing
+	 */
 	boolean hasTriggerSensors() const;
 
 	boolean hasTrigger(int id) const {

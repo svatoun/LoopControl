@@ -175,14 +175,18 @@ void s88InLoop() {
 			s.triggerChange = false;
 		}
 	}
-	for (int i = 0; i < sensorCount; i++) {
+	unsigned long processed = 0x00;
+	unsigned long mask = 0x01;
+
+	for (int i = 0; i < sensorCount; i++, mask = mask << 1) {
 		Sensor& s = sensors[i];
 		if (s.changeProcessing) {
 			s.triggerChange = false;
 			if (s.suspended) {
 				continue;
 			}
-			s.changeProcessing = false;
+			// retain "changing" for this process cycle.
+			processed |= mask;
 			if (debugS88) {
 				Serial.print(F("Sensor ")); Serial.print(s.sensorId); Serial.print(" trigger:"); Serial.print(s.triggerSensor);
 				Serial.print(F(" changed to: ")); Serial.print(s.reportState);
@@ -198,12 +202,13 @@ void s88InLoop() {
 			}
 		}
 	}
-	/*
-	for (int i = 0; i < sensorCount; i++) {
-		Sensor& s = sensors[i];
-		s.changeProcessing = false;
+	mask = 0x01;
+	for (int i = 0; i < sensorCount; i++, mask = mask << 1) {
+		if ((processed & mask) > 0) {
+			Sensor& s = sensors[i];
+			s.changeProcessing = false;
+		}
 	}
-	*/
 }
 
 // ==================== Routines run in the interrupt ======================
